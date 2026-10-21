@@ -31,6 +31,7 @@ app.use(express.json())
 app.use(credentialGuard)
 
 app.use('/api/tatum', tatumRoutes)
+app.use('/api', tatumRoutes)
 
 const server = createHttpServer(app)
 
