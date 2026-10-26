@@ -15,7 +15,7 @@ import {
 
 const router = Router()
 
-function sendError(res, error, fallback) {
+export function sendError(res, error, fallback) {
   if (error instanceof MissingMemWalConfigError) {
     return res.status(503).json({ error: error.message, code: 'memwal-not-configured' })
   }
@@ -69,27 +69,37 @@ router.get('/picks', async (_req, res) => {
   }
 })
 
-// Grade a pick. Writes a grade memory, then the source's new credibility score,
-// then any pattern in the user's journal whose verdict changed.
+// Grading writes a grade memory, then the source's new credibility score, then
+// any pattern in the user's journal whose verdict changed. `state` is the picks,
+// credibility and profile already loaded; it is updated in place so several
+// grades in a row (auto-settling) build on each other without re-reading.
+async function gradeAndLearn(state, pick, grade) {
+  const accepted = await memwal().remember(encodeGrade(pick, grade), NAMESPACES.grades)
+  // Score from the picks we already hold plus this grade, so we don't wait on the write.
+  pick.status = grade.result
+  pick.grade = grade
+  const key = credKey(pick.source, pick.league)
+  const cred = await writeCredibility(state.picks, pick, state.credibility.current.get(key))
+  state.credibility.current.set(key, { ...cred.record, blobId: null })
+  const patterns = await writePatternChanges(state.picks, state.profile)
+  return { jobId: accepted.job_id, credibility: cred.sentence, trust: cred.record.trust, prevTrust: cred.record.prevTrust, patterns }
+}
+
+export async function loadState() {
+  const [picks, credibility, profile] = await Promise.all([loadPicks(), loadCredibility(), loadProfile()])
+  return { picks, credibility, profile }
+}
+
 router.post('/picks/:id/grade', async (req, res) => {
   const result = req.body?.result
   if (!RESULTS.includes(result)) return res.status(400).json({ error: `result must be one of ${RESULTS.join(', ')}` })
   const closingOdds = typeof req.body?.closingOdds === 'string' ? req.body.closingOdds.trim().slice(0, 20) : ''
   try {
-    const [picks, credibility, profile] = await Promise.all([loadPicks(), loadCredibility(), loadProfile()])
-    const pick = picks.find((p) => p.id === req.params.id)
+    const state = await loadState()
+    const pick = state.picks.find((p) => p.id === req.params.id)
     if (!pick) return res.status(404).json({ error: 'Pick not found in memory' })
-
     const grade = { pickId: pick.id, result, closingOdds: closingOdds || null, gradedAt: new Date().toISOString() }
-    const accepted = await memwal().remember(encodeGrade(pick, grade), NAMESPACES.grades)
-
-    // Score from the picks we already hold plus this grade, so we don't wait on the write.
-    pick.status = result
-    pick.grade = grade
-    const previous = credibility.current.get(credKey(pick.source, pick.league))
-    const cred = await writeCredibility(picks, pick, previous)
-    const patterns = await writePatternChanges(picks, profile)
-    res.status(202).json({ jobId: accepted.job_id, credibility: cred.sentence, trust: cred.record.trust, prevTrust: cred.record.prevTrust, patterns })
+    res.status(202).json(await gradeAndLearn(state, pick, grade))
   } catch (err) {
     sendError(res, err, 'Failed to grade pick')
   }
@@ -182,4 +192,5 @@ router.get('/memories', async (_req, res) => {
   }
 })
 
+export { gradeAndLearn }
 export default router

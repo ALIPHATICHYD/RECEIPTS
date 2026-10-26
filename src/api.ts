@@ -21,6 +21,41 @@ export interface PickRecord {
   grade?: { result: PickStatus; closingOdds: string | null; gradedAt: string; blobId?: string; explorerUrl?: string | null } | null;
   trust?: number | null;
   advice?: Advice[];
+  platform?: 'polymarket' | 'kalshi';
+  marketId?: string;
+  outcome?: string;
+  marketUrl?: string;
+  externalId?: string;
+  tradedAt?: string;
+}
+
+export interface PredictionMarket {
+  id: string;
+  platform: 'polymarket' | 'kalshi';
+  eventTitle: string;
+  question: string;
+  category: string | null;
+  status: string;
+  closeTime: string | null;
+  outcomes: { name: string; price: number }[];
+  volume: number;
+  url: string | null;
+}
+
+export interface Trader {
+  rank: number;
+  proxyWallet: string;
+  userName: string | null;
+  xUsername: string | null;
+  vol: number;
+  pnl: number;
+}
+
+export interface LivePrice {
+  pickId: string;
+  price: number | null;
+  status: string | null;
+  settledFor: string | null;
 }
 
 export interface MemoryRef {
@@ -70,7 +105,8 @@ export interface ProfileData {
   segments: { key: string; label: string; n: number; won: number; lost: number; roi: number; verdict: string }[];
 }
 
-export type PickInput = Pick<PickRecord, 'event' | 'market' | 'side' | 'odds' | 'source' | 'category' | 'confidence' | 'notes'>;
+export type PickInput = Pick<PickRecord, 'event' | 'market' | 'side' | 'odds' | 'source' | 'category' | 'confidence' | 'notes'> &
+  Partial<Pick<PickRecord, 'platform' | 'marketId' | 'outcome' | 'marketUrl'>>;
 
 export interface MemoryRow {
   memoryId: string;
@@ -94,6 +130,10 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   });
+  if (!res.headers.get('content-type')?.includes('application/json')) {
+    // A server still running older code answers new routes with the app's HTML page.
+    throw new Error(`The server has no ${path.split('?')[0]} route. Stop it and run npm run dev again to load the latest code.`);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data as T;
@@ -117,6 +157,17 @@ export const api = {
   setLimit: (maxDailyLosses: number) =>
     call<{ jobId: string; sentence: string }>('/api/profile/limit', { method: 'POST', body: JSON.stringify({ maxDailyLosses }) }),
   listMemories: () => call<{ network: string; total: number; memories: MemoryRow[] }>('/api/memories'),
+  searchMarkets: (q: string) => call<{ markets: PredictionMarket[] }>(`/api/prediction/search?q=${encodeURIComponent(q)}`),
+  topTraders: (category: string, period: string) =>
+    call<{ traders: Trader[] }>(`/api/prediction/traders?category=${category}&period=${period}`),
+  followTrader: (wallet: string, userName: string | null, limit = 5) =>
+    call<{ created: { pick: PickRecord; jobId: string }[]; skipped: number }>('/api/prediction/follow', {
+      method: 'POST',
+      body: JSON.stringify({ wallet, userName, limit }),
+    }),
+  livePrices: () => call<{ prices: LivePrice[] }>('/api/prediction/live'),
+  settle: () =>
+    call<{ checked: number; graded: { pickId: string; result: string; winner: string }[]; learned: string[] }>('/api/prediction/settle', { method: 'POST' }),
   suiBalance: (address: string) =>
     call<{ sui: string; usdc: string }>(`/api/sui/balance?address=${encodeURIComponent(address)}`),
 };
@@ -182,4 +233,10 @@ export function shortId(id: string | null | undefined): string {
 
 export function pct(x: number): string {
   return `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`;
+}
+
+export function usd(x: number): string {
+  const a = Math.abs(x);
+  const v = a >= 1e6 ? `${(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `${(a / 1e3).toFixed(0)}k` : a.toFixed(0);
+  return `${x < 0 ? '-' : ''}$${v}`;
 }
