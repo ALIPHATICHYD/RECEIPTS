@@ -712,7 +712,7 @@ export default function App() {
                   <form onSubmit={handleSearchMarkets} className="flex gap-sm">
                     <input
                       type="text"
-                      placeholder="Search live markets, e.g. Senate, Ballon d'Or, Lakers"
+                      placeholder="Search, e.g. Senate, Ballon d'Or, Lakers, or paste a Polymarket link"
                       value={marketQuery}
                       onChange={(e) => setMarketQuery(e.target.value)}
                       className={inputClass}
@@ -750,7 +750,7 @@ export default function App() {
                       ))}
                     </ul>
                   )}
-                  <p className="text-xs text-tertiary">Pick an outcome to fill the form. Prices come from Tatum's prediction market API.</p>
+                  <p className="text-xs text-tertiary">Pick an outcome to fill the form. Markets from a pasted link are listed first. Prices come from Tatum's prediction market API.</p>
                 </>
               )}
             </div>
