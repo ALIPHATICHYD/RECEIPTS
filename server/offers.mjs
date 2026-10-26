@@ -77,21 +77,27 @@ export function createOffer(body) {
 }
 
 export const getOffer = (id) => load().find((o) => o.id === id) ?? null
-export const isDigestUsed = (digest) => load().some((o) => o.unlocked?.digest === digest)
+const unlocksOf = (o) => [o.unlocked, ...(o.buyers ?? [])].filter(Boolean)
+export const isDigestUsed = (digest) => load().some((o) => unlocksOf(o).some((u) => u.digest === digest))
+export const unlockFor = (offer, digest) => unlocksOf(offer).find((u) => u.digest === digest) ?? null
 
-export function markUnlocked(id, unlocked) {
+// `unlocked` is the owner's own agent buying the pick, which reveals it in this
+// journal. Any other buyer (a visitor paying from their own wallet) is listed in
+// `buyers` and gets the pick in the response only.
+export function recordUnlock(id, unlock, { byAgent }) {
   const offers = load()
   const offer = offers.find((o) => o.id === id)
   if (!offer) return null
-  offer.unlocked = unlocked
+  if (byAgent && !offer.unlocked) offer.unlocked = unlock
+  else offer.buyers = [...(offer.buyers ?? []), unlock]
   save(offers)
   return offer
 }
 
-// What anyone may see before paying: no pick, no salt.
+// What anyone may see: no pick and no salt unless the owner's agent bought it.
 export function publicOffer(o) {
-  const { hidden, salt, ...rest } = o
-  return o.unlocked ? { ...rest, hidden, salt } : rest
+  const { hidden, salt, buyers, ...rest } = o
+  return { ...rest, buyerCount: (buyers?.length ?? 0) + (o.unlocked ? 1 : 0), ...(o.unlocked ? { hidden, salt } : {}) }
 }
 
 export const listOffers = () => load().map(publicOffer)

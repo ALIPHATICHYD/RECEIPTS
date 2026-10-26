@@ -49,6 +49,8 @@ function sui() {
 }
 
 const MOCK_AGENT = `0x${'a9'.repeat(32)}`
+const MOCK_VISITOR = `0x${'b7'.repeat(32)}`
+const mockAgentDigests = new Set()
 
 function agentKeypair() {
   const key = process.env.AGENT_SUI_PRIVATE_KEY
@@ -71,7 +73,11 @@ export async function balances(address) {
 // Send `amount` atomic USDC from the agent's wallet to `payTo`. Returns the digest
 // once the transaction is final, so the seller can look it up straight away.
 export async function payUsdc(payTo, amount) {
-  if (paymentsMock()) return `mock${randomBytes(16).toString('hex')}`
+  if (paymentsMock()) {
+    const digest = `mock${randomBytes(16).toString('hex')}`
+    mockAgentDigests.add(digest)
+    return digest
+  }
   const signer = agentKeypair()
   const tx = new Transaction()
   tx.setSender(signer.getPublicKey().toSuiAddress())
@@ -91,7 +97,9 @@ export async function verifyPayment({ digest, payTo, amount, notBefore }) {
     return { ok: false, reason: 'Not a Sui transaction digest' }
   }
   if (digest.startsWith('mock')) {
-    return paymentsMock() ? { ok: true, payer: MOCK_AGENT, paid: String(amount), timestampMs: Date.now() } : { ok: false, reason: 'Mock payments are off' }
+    // Mock digests the agent didn't make stand for a visitor's wallet.
+    const payer = mockAgentDigests.has(digest) ? MOCK_AGENT : MOCK_VISITOR
+    return paymentsMock() ? { ok: true, payer, paid: String(amount), timestampMs: Date.now() } : { ok: false, reason: 'Mock payments are off' }
   }
   let tx
   try {

@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { memwal, NAMESPACES } from '../memwal-client.mjs'
 import { validatePickInput, encodePick } from '../picks.mjs'
 import { loadCredibility, credKey, recallAll, proof } from '../learning.mjs'
-import { createOffer, getOffer, isDigestUsed, markUnlocked, listOffers, publicOffer } from '../offers.mjs'
+import { createOffer, getOffer, isDigestUsed, unlockFor, recordUnlock, listOffers, publicOffer } from '../offers.mjs'
 import {
   agentAddress,
   balances,
@@ -17,6 +17,7 @@ import {
   PaymentConfigError,
 } from '../sui-payments.mjs'
 import { sendError } from './receipts.mjs'
+import { tatumRpc } from '../tatum-client.mjs'
 
 const router = Router()
 const PAY_MARKER = 'RECEIPTS_PAY_V1 '
@@ -34,6 +35,28 @@ async function remember(sentence, record) {
 const network = () => `sui-${paymentsNetwork()}`
 
 // ---------- Seller side ----------
+
+// What a browser wallet needs to build the payment itself.
+router.get('/x402/config', (_req, res) => {
+  res.json({ network: paymentsNetwork(), mock: paymentsMock(), usdcType: usdcType() })
+})
+
+// Sui JSON-RPC for browser wallets, relayed to the Tatum gateway so the API key
+// stays on the server. Only reads, dry runs and executing an already-signed
+// transaction are allowed.
+const RPC_ALLOWED = /^(sui_get|suix_get|sui_multiGet|sui_tryGet|sui_dryRun|sui_devInspect|sui_executeTransactionBlock$|suix_resolve|suix_queryEvents$|sui_getChainIdentifier$)/
+router.post('/sui-rpc', async (req, res) => {
+  const calls = Array.isArray(req.body) ? req.body : [req.body]
+  if (!calls.length || calls.length > 20 || calls.some((c) => typeof c?.method !== 'string' || !RPC_ALLOWED.test(c.method))) {
+    return res.status(403).json({ jsonrpc: '2.0', id: req.body?.id ?? null, error: { code: -32601, message: 'Method not allowed through this relay' } })
+  }
+  try {
+    const upstream = await tatumRpc('sui', req.body, paymentsNetwork())
+    res.status(upstream.status).type('application/json').send(await upstream.text())
+  } catch (err) {
+    fail(res, err, 'Sui RPC relay failed')
+  }
+})
 
 router.get('/x402/offers', (_req, res) => {
   res.json({ network: paymentsNetwork(), mock: paymentsMock(), offers: listOffers() })
@@ -105,15 +128,21 @@ router.get('/x402/offers/:id/pick', async (req, res) => {
   const payment = decodePaymentHeader(header)
   const digest = payment?.payload?.transactionDigest
   if (!payment || payment.network !== network()) return res.status(402).json(paymentRequired(req, offer, 'Invalid X-PAYMENT header'))
-  // One transaction unlocks one offer, once.
-  if (isDigestUsed(digest) && offer.unlocked?.digest !== digest) {
-    return res.status(402).json(paymentRequired(req, offer, 'This payment was already used'))
-  }
+  // One transaction unlocks one offer. Re-sending the same proof for the same
+  // offer returns the pick again (a buyer reloading), anything else is refused.
+  const previous = unlockFor(offer, digest)
+  if (!previous && isDigestUsed(digest)) return res.status(402).json(paymentRequired(req, offer, 'This payment was already used'))
   try {
-    const check = offer.unlocked?.digest === digest ? { ok: true, payer: offer.unlocked.payer } : await verifyPayment({ digest, payTo: offer.payTo, amount: offer.amount, notBefore: offer.createdAt })
+    const check = previous ? { ok: true, payer: previous.payer } : await verifyPayment({ digest, payTo: offer.payTo, amount: offer.amount, notBefore: offer.createdAt })
     if (!check.ok) return res.status(402).json(paymentRequired(req, offer, check.reason))
-    const unlocked = offer.unlocked ?? markUnlocked(offer.id, { digest, payer: check.payer, at: new Date().toISOString() }).unlocked
-    const settlement = { success: true, network: network(), transaction: digest, payer: unlocked.payer }
+    if (!previous) {
+      let agent = null
+      try {
+        agent = agentAddress()
+      } catch {}
+      recordUnlock(offer.id, { digest, payer: check.payer, at: new Date().toISOString() }, { byAgent: !!agent && check.payer?.toLowerCase() === agent.toLowerCase() })
+    }
+    const settlement = { success: true, network: network(), transaction: digest, payer: check.payer }
     res.set('X-PAYMENT-RESPONSE', Buffer.from(JSON.stringify(settlement)).toString('base64'))
     res.json({ pick: { ...offer.hidden, event: offer.event, source: offer.source, league: offer.league, category: offer.category }, salt: offer.salt, commitment: offer.commitment, settlement })
   } catch (err) {

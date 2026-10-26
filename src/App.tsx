@@ -48,6 +48,7 @@ import {
   pct,
   usd,
 } from './api';
+import { ConnectWallet, WalletBuyButton } from './WalletBuy';
 
 type Tab = 'feed' | 'log' | 'sources' | 'agent' | 'memory' | 'wallet';
 type FeedFilter = 'all' | Category;
@@ -1134,6 +1135,17 @@ export default function App() {
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
             </div>
+            <div className="p-xl rounded-md bg-secondary border border-secondary flex flex-col md:flex-row md:items-center justify-between gap-md">
+              <div className="space-y-xxs">
+                <div className="text-sm font-bold flex items-center gap-xs">
+                  <Wallet className="w-4 h-4 text-brand-primary" /> Buy a pick yourself
+                </div>
+                <p className="text-xs text-secondary">
+                  Connect any Sui wallet (Slush, Suiet, Phantom) holding a little USDC and SUI for gas. You pay the seller directly, the payment is checked through Tatum, and the pick shows only in your browser.
+                </p>
+              </div>
+              <ConnectWallet />
+            </div>
             {paymentsMock && <div className="p-md rounded-md bg-tertiary border border-secondary text-xs text-secondary">Mock payments are on: nothing is paid on chain.</div>}
             {agentError && <ErrorBox message={agentError} />}
 
@@ -1228,6 +1240,12 @@ export default function App() {
                           <div className="text-xs text-tertiary uppercase font-medium">Price</div>
                           <div className="text-sm font-bold">{o.price} USDC</div>
                         </div>
+                        {!!o.buyerCount && (
+                          <div className="text-center">
+                            <div className="text-xs text-tertiary uppercase font-medium">Bought</div>
+                            <div className="text-sm font-bold">{o.buyerCount}×</div>
+                          </div>
+                        )}
                         {o.unlocked ? (
                           <span className="inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700">
                             <Unlock className="w-3.5 h-3.5" /> Unlocked
@@ -1243,6 +1261,7 @@ export default function App() {
                         )}
                       </div>
                     </div>
+                    {!o.unlocked && <WalletBuyButton offer={o} mock={paymentsMock} onError={setAgentError} />}
                     {result?.decision === 'skipped' && <AdviceList advice={[{ tone: 'warn', text: `Skipped: ${result.reason}` }]} />}
                     {o.unlocked && o.hidden && (
                       <div className="p-md rounded-md bg-utility-success-50 border border-utility-success-200 text-xs text-utility-success-700 flex flex-wrap items-center gap-xs">

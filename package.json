@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@mysten-incubation/memwal": "^0.1.9",
+    "@mysten/dapp-kit-react": "^2.1.41",
     "@mysten/seal": "^1.5.1",
     "@mysten/sui": "^2.37.0",
     "@vitejs/plugin-react": "^4.3.1",
