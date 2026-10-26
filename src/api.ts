@@ -94,6 +94,10 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   });
+  if (!res.headers.get('content-type')?.includes('application/json')) {
+    // A server still running older code answers new routes with the app's HTML page.
+    throw new Error(`The server has no ${path.split('?')[0]} route. Stop it and run npm run dev again to load the latest code.`);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data as T;

@@ -34,6 +34,9 @@ app.use(credentialGuard)
 app.use('/api/tatum', tatumRoutes)
 app.use('/api', receiptsRoutes)
 app.use('/api', tatumRoutes)
+// Unknown API paths get a JSON 404 instead of falling through to Vite's SPA
+// fallback, which answers 200 with index.html and crashes the client's JSON reads.
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API route. Restart the server to load the latest code.' }))
 
 const server = createHttpServer(app)
 
