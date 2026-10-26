@@ -17,3 +17,4 @@ dist/
 
 # Local state for sealed x402 picks (hidden pick text, salts, used payment digests).
 data/
+*.tsbuildinfo
