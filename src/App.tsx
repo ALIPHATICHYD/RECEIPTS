@@ -16,6 +16,9 @@ import {
   ClipboardPaste,
   AlertTriangle,
   Loader2,
+  Link2,
+  UserPlus,
+  Search,
 } from 'lucide-react';
 import {
   api,
@@ -31,7 +34,11 @@ import {
   type Advice,
   type CredibilityRecord,
   type ProfileData,
+  type PredictionMarket,
+  type Trader,
+  type LivePrice,
   pct,
+  usd,
 } from './api';
 
 type Tab = 'feed' | 'log' | 'sources' | 'memory' | 'wallet';
@@ -166,6 +173,19 @@ function TrustDelta({ from, to }: { from: number; to: number }) {
   return <span className={`text-xs font-semibold ${up ? 'text-utility-success-700' : 'text-utility-error-700'}`}>{up ? '▲' : '▼'} {Math.abs(to - from)}</span>;
 }
 
+// Where the market now prices the picked outcome, against the price at pick time.
+function LiveMove({ from, to }: { from: number; to: number }) {
+  const move = Number.isFinite(from) && from > 0 && from < 1 ? Math.round((to - from) * 100) : null;
+  return (
+    <div className="text-xs font-mono text-tertiary" title="Live price from Tatum's prediction market API">
+      now {to.toFixed(3)}
+      {move !== null && move !== 0 && (
+        <span className={move > 0 ? 'text-utility-success-700' : 'text-utility-error-700'}> {move > 0 ? '+' : ''}{move}¢</span>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('feed');
   const [network, setNetwork] = useState<string>('…');
@@ -191,6 +211,19 @@ export default function App() {
   const [limitInput, setLimitInput] = useState('3');
   const [learningError, setLearningError] = useState<string | null>(null);
 
+  const [live, setLive] = useState<Record<string, LivePrice>>({});
+  const [settling, setSettling] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [marketQuery, setMarketQuery] = useState('');
+  const [marketResults, setMarketResults] = useState<PredictionMarket[] | null>(null);
+  const [searchingMarkets, setSearchingMarkets] = useState(false);
+  const [linked, setLinked] = useState<{ market: PredictionMarket; outcome: string } | null>(null);
+  const [traderCategory, setTraderCategory] = useState('SPORTS');
+  const [traders, setTraders] = useState<Trader[] | null>(null);
+  const [tradersLoading, setTradersLoading] = useState(false);
+  const [followingWallet, setFollowingWallet] = useState<string | null>(null);
+  const [predictionError, setPredictionError] = useState<string | null>(null);
+
   const [memories, setMemories] = useState<MemoryRow[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
   const [memoriesError, setMemoriesError] = useState<string | null>(null);
@@ -208,6 +241,13 @@ export default function App() {
       const data = await api.listPicks();
       setPicks(data.picks);
       setNetwork(data.network);
+      // Live market prices for open picks linked to a prediction market.
+      if (data.picks.some((p) => p.status === 'pending' && p.marketId)) {
+        api
+          .livePrices()
+          .then((r) => setLive(Object.fromEntries(r.prices.map((x) => [x.pickId, x]))))
+          .catch(() => {});
+      }
     } catch (err: any) {
       setPicksError(err.message);
     } finally {
@@ -273,6 +313,93 @@ export default function App() {
     }
   };
 
+  const handleSettle = async () => {
+    setSettling(true);
+    setPicksError(null);
+    try {
+      const res = await api.settle();
+      if (res.graded.length) {
+        setLearned(res.learned);
+        await new Promise((r) => setTimeout(r, 4000));
+        await loadPicks();
+      } else {
+        setNotice(`Checked ${res.checked} linked pick${res.checked === 1 ? '' : 's'}. None of their markets have settled yet.`);
+      }
+    } catch (err: any) {
+      setPicksError(err.message);
+    } finally {
+      setSettling(false);
+    }
+  };
+
+  const handleSearchMarkets = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (marketQuery.trim().length < 2) return;
+    setSearchingMarkets(true);
+    setFormError(null);
+    try {
+      setMarketResults((await api.searchMarkets(marketQuery.trim())).markets);
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setSearchingMarkets(false);
+    }
+  };
+
+  const linkMarket = (market: PredictionMarket, outcome: { name: string; price: number }) => {
+    setLinked({ market, outcome: outcome.name });
+    setMarketResults(null);
+    setForm((f) => ({
+      ...f,
+      category: 'Polymarket',
+      event: market.eventTitle,
+      market: market.question,
+      side: outcome.name,
+      odds: outcome.price.toFixed(3),
+      platform: market.platform,
+      marketId: market.id,
+      outcome: outcome.name,
+      marketUrl: market.url ?? undefined,
+    }));
+  };
+
+  const unlinkMarket = () => {
+    setLinked(null);
+    setForm((f) => ({ ...f, platform: undefined, marketId: undefined, outcome: undefined, marketUrl: undefined }));
+  };
+
+  const loadTraders = async (category = traderCategory) => {
+    setTradersLoading(true);
+    setPredictionError(null);
+    try {
+      setTraders((await api.topTraders(category, 'MONTH')).traders);
+    } catch (err: any) {
+      setPredictionError(err.message);
+    } finally {
+      setTradersLoading(false);
+    }
+  };
+
+  const handleFollow = async (t: Trader) => {
+    setFollowingWallet(t.proxyWallet);
+    setPredictionError(null);
+    try {
+      const res = await api.followTrader(t.proxyWallet, t.userName);
+      setPicks((prev) => [...res.created.map((c) => c.pick), ...prev]);
+      const name = t.userName ?? t.proxyWallet.slice(0, 10);
+      setNotice(
+        res.created.length
+          ? `Logged ${res.created.length} of @${name}'s latest Polymarket trades as picks on Walrus. They grade themselves when their markets settle.`
+          : `No new trades from @${name} since the last import.`,
+      );
+      if (res.created.length) setTimeout(loadPicks, 4000);
+    } catch (err: any) {
+      setPredictionError(err.message);
+    } finally {
+      setFollowingWallet(null);
+    }
+  };
+
   const handleSetLimit = async () => {
     const n = Number(limitInput);
     if (!Number.isInteger(n) || n < 0) return;
@@ -322,6 +449,7 @@ export default function App() {
       setPicks((prev) => [pick, ...prev]);
       setForm({ ...EMPTY_FORM, source: form.source, category: form.category });
       setTipText('');
+      setLinked(null);
       const final = await waitForJob(jobId, setSaveJob);
       if (final.status === 'done') {
         setPicks((prev) => prev.map((p) => (p.id === pick.id ? { ...p, blobId: final.blobId ?? undefined, explorerUrl: final.explorerUrl } : p)));
@@ -402,6 +530,13 @@ export default function App() {
               </div>
             )}
 
+        {notice && (
+          <div className="p-md rounded-md bg-tertiary border border-secondary text-secondary text-xs flex items-center justify-between gap-md">
+            <span>{notice}</span>
+            <button onClick={() => setNotice(null)} className="underline flex-shrink-0">Dismiss</button>
+          </div>
+        )}
+
         {/* ================= FEED ================= */}
         {activeTab === 'feed' && (
           <div className="space-y-2xl">
@@ -434,6 +569,16 @@ export default function App() {
                     {f === 'all' ? 'All Picks' : f}
                   </button>
                 ))}
+                {picks.some((p) => p.status === 'pending' && p.marketId) && (
+                  <button
+                    onClick={handleSettle}
+                    disabled={settling}
+                    className="px-md py-xs rounded-sm text-xs font-medium border border-utility-brand-200 bg-utility-brand-50 text-utility-brand-700 flex items-center gap-xxs disabled:opacity-60"
+                    title="Grade linked picks whose market has settled, using Tatum's prediction market data"
+                  >
+                    {settling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />} Check market results
+                  </button>
+                )}
                 <button onClick={loadPicks} className="p-xs rounded-sm border border-secondary bg-secondary text-secondary hover:text-primary" title="Refresh">
                   <RefreshCw className={`w-3.5 h-3.5 ${picksLoading ? 'animate-spin' : ''}`} />
                 </button>
@@ -464,6 +609,17 @@ export default function App() {
                         {timeAgo(pick.loggedAt)}
                       </span>
                       <span className="text-xs font-medium text-brand-primary">{pick.source}</span>
+                      {pick.marketId && (
+                        <a
+                          href={pick.marketUrl ?? undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-secondary inline-flex items-center gap-xxs hover:underline"
+                          title={pick.status === 'pending' ? 'Linked market: grades itself when it settles' : 'Linked market'}
+                        >
+                          <Link2 className="w-3 h-3" /> {pick.platform === 'kalshi' ? 'Kalshi' : 'Polymarket'}
+                        </a>
+                      )}
                       {pick.blobId ? (
                         <ProofLink url={pick.explorerUrl} blobId={pick.blobId} />
                       ) : (
@@ -485,6 +641,9 @@ export default function App() {
                       <div className="text-xs text-tertiary uppercase font-medium">Selected Side</div>
                       <div className="text-sm font-bold text-primary">{pick.side}</div>
                       <div className="text-xs text-secondary font-mono">{pick.odds || '—'}</div>
+                      {pick.status === 'pending' && live[pick.id]?.price != null && (
+                        <LiveMove from={Number(pick.odds)} to={live[pick.id].price as number} />
+                      )}
                     </div>
                     <div className="min-w-[80px] text-center">
                       <div className="text-xs text-tertiary uppercase font-medium">Source Trust</div>
@@ -535,6 +694,65 @@ export default function App() {
                 <Sparkles className="w-3.5 h-3.5 text-brand-primary" /> {parsing ? 'Reading…' : 'Fill the form from this tip'}
               </button>
               <p className="text-xs text-tertiary">Check the fields below before saving. Nothing is stored until you commit.</p>
+            </div>
+
+            <div className="p-xl rounded-md bg-secondary border border-secondary space-y-md">
+              <div className="flex items-center gap-xs text-sm font-semibold">
+                <Link2 className="w-4 h-4 text-brand-primary" /> Link a Polymarket market
+              </div>
+              {linked ? (
+                <div className="p-md rounded-md bg-utility-brand-50 border border-utility-brand-200 text-utility-brand-700 text-xs flex items-center justify-between gap-md">
+                  <span>
+                    Linked: <strong>{linked.outcome}</strong> on “{linked.market.question}”. Receipts tracks its live price and grades it when the market settles.
+                  </span>
+                  <button type="button" onClick={unlinkMarket} className="underline flex-shrink-0">Unlink</button>
+                </div>
+              ) : (
+                <>
+                  <form onSubmit={handleSearchMarkets} className="flex gap-sm">
+                    <input
+                      type="text"
+                      placeholder="Search live markets, e.g. Senate, Ballon d'Or, Lakers"
+                      value={marketQuery}
+                      onChange={(e) => setMarketQuery(e.target.value)}
+                      className={inputClass}
+                    />
+                    <button
+                      type="submit"
+                      disabled={searchingMarkets || marketQuery.trim().length < 2}
+                      className="px-lg py-xs rounded-md bg-tertiary border border-secondary text-xs font-semibold text-primary hover:bg-secondary-hover disabled:opacity-50 flex items-center gap-xs"
+                    >
+                      {searchingMarkets ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />} Search
+                    </button>
+                  </form>
+                  {marketResults && marketResults.length === 0 && <p className="text-xs text-tertiary">No active markets match that.</p>}
+                  {marketResults && marketResults.length > 0 && (
+                    <ul className="space-y-xs max-h-80 overflow-y-auto">
+                      {marketResults.map((m) => (
+                        <li key={m.id} className="p-md rounded-md bg-tertiary border border-secondary space-y-xs">
+                          <div className="text-xs text-tertiary">
+                            {m.eventTitle} · {usd(m.volume ?? 0)} volume{m.closeTime ? ` · closes ${new Date(m.closeTime).toLocaleDateString()}` : ''}
+                          </div>
+                          <div className="text-sm font-medium text-primary">{m.question}</div>
+                          <div className="flex flex-wrap gap-xs">
+                            {m.outcomes.map((o) => (
+                              <button
+                                key={o.name}
+                                type="button"
+                                onClick={() => linkMarket(m, o)}
+                                className="px-md py-xxs rounded-sm border border-secondary bg-secondary text-xs font-medium text-primary hover:bg-secondary-hover"
+                              >
+                                {o.name} <span className="font-mono text-tertiary">{o.price.toFixed(3)}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-xs text-tertiary">Pick an outcome to fill the form. Prices come from Tatum's prediction market API.</p>
+                </>
+              )}
             </div>
 
             {saveJob && (
@@ -620,6 +838,85 @@ export default function App() {
               </p>
             </div>
             {learningError && <ErrorBox message={learningError} />}
+
+            <div className="p-xl rounded-md bg-secondary border border-secondary space-y-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-sm">
+                <div>
+                  <div className="flex items-center gap-xs text-base font-bold">
+                    <UserPlus className="w-4 h-4 text-brand-primary" /> Follow Polymarket's top traders
+                  </div>
+                  <p className="text-xs text-secondary">
+                    Their latest trades become picks on Walrus and grade themselves when the market settles, so Receipts learns whether a leaderboard name is worth following.
+                  </p>
+                </div>
+                <div className="flex items-center gap-xs flex-shrink-0">
+                  <select
+                    value={traderCategory}
+                    onChange={(e) => {
+                      setTraderCategory(e.target.value);
+                      if (traders) loadTraders(e.target.value);
+                    }}
+                    className="px-sm py-xs rounded-sm bg-tertiary border border-secondary text-xs text-primary"
+                    aria-label="Leaderboard category"
+                  >
+                    <option value="SPORTS">Sports</option>
+                    <option value="POLITICS">Politics</option>
+                    <option value="CRYPTO">Crypto</option>
+                    <option value="OVERALL">Overall</option>
+                  </select>
+                  <button
+                    onClick={() => loadTraders()}
+                    disabled={tradersLoading}
+                    className="px-md py-xs rounded-sm bg-brand-solid text-primary-on-brand text-xs font-semibold flex items-center gap-xxs disabled:opacity-60"
+                  >
+                    {tradersLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {traders ? 'Refresh' : 'Load this month’s leaders'}
+                  </button>
+                </div>
+              </div>
+              {predictionError && <ErrorBox message={predictionError} />}
+              {traders && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-secondary text-xs font-medium text-tertiary uppercase tracking-wider">
+                        <th className="py-xs px-sm">#</th>
+                        <th className="py-xs px-sm">Trader</th>
+                        <th className="py-xs px-sm">30-day PnL</th>
+                        <th className="py-xs px-sm">Volume</th>
+                        <th className="py-xs px-sm">Receipts trust</th>
+                        <th className="py-xs px-sm"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-secondary">
+                      {traders.map((t) => {
+                        const handle = `@${t.userName ?? t.proxyWallet.slice(0, 10)}`.toLowerCase();
+                        const cred = credBoard.filter((c) => c.source.toLowerCase() === handle);
+                        return (
+                          <tr key={t.proxyWallet}>
+                            <td className="py-xs px-sm text-tertiary">{t.rank}</td>
+                            <td className="py-xs px-sm font-medium text-primary">{t.userName ?? shortId(t.proxyWallet)}</td>
+                            <td className={`py-xs px-sm text-xs font-semibold ${t.pnl >= 0 ? 'text-utility-success-700' : 'text-utility-error-700'}`}>{usd(t.pnl)}</td>
+                            <td className="py-xs px-sm text-xs text-secondary">{usd(t.vol)}</td>
+                            <td className="py-xs px-sm text-xs text-secondary">
+                              {cred.length ? cred.map((c) => `${c.trust} on ${c.league}`).join(', ') : 'Not graded yet'}
+                            </td>
+                            <td className="py-xs px-sm text-right">
+                              <button
+                                onClick={() => handleFollow(t)}
+                                disabled={followingWallet !== null}
+                                className="px-md py-xxs rounded-sm border border-secondary bg-tertiary text-xs font-medium text-primary hover:bg-secondary-hover disabled:opacity-50 inline-flex items-center gap-xxs"
+                              >
+                                {followingWallet === t.proxyWallet ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />} Log latest 5 trades
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
 
             {credBoard.length === 0 ? (
               <p className="text-sm text-secondary">No graded picks yet. Grade an open pick in the feed and its source gets a score here.</p>

@@ -212,6 +212,9 @@ export async function writePatternChanges(picks, profile) {
           : `Pattern: ${pat.label} are back to break-even (${pct(pat.roi)} ROI over ${pat.n} picks); the earlier ${previous.verdict} no longer holds.`
     const record = { type: 'pattern', ...pat, supersedes: previous?.blobId ?? null, recordedAt: new Date().toISOString() }
     await memwal().remember(`${sentence}\n${PROFILE_MARKER}${JSON.stringify(record)}`, NAMESPACES.profile)
+    // Keep the in-hand profile current so grading several picks in a row
+    // doesn't write the same verdict twice.
+    profile.patterns.set(pat.key, { ...record, blobId: previous?.blobId ?? null })
     writes.push(sentence)
   }
   return writes

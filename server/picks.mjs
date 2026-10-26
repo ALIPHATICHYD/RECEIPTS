@@ -66,6 +66,20 @@ export function validatePickInput(body) {
     loggedAt: new Date().toISOString(),
     status: 'pending',
   }
+  // Optional link to a prediction market, so the pick can be priced and graded
+  // automatically. Only kept when the market id looks real.
+  const marketId = clean(body?.marketId, 100)
+  if (/^(0x[0-9a-f]{64}|[A-Z0-9][A-Z0-9._-]{2,99})$/i.test(marketId)) {
+    pick.platform = body?.platform === 'kalshi' ? 'kalshi' : 'polymarket'
+    pick.marketId = marketId
+    pick.outcome = clean(body?.outcome, 120) || pick.side
+    const url = clean(body?.marketUrl, 300)
+    if (/^https:\/\/(polymarket\.com|kalshi\.com)\//.test(url)) pick.marketUrl = url
+    const externalId = clean(body?.externalId, 100)
+    if (externalId) pick.externalId = externalId
+    const tradedAt = clean(body?.tradedAt, 40)
+    if (tradedAt) pick.tradedAt = tradedAt
+  }
   if (!pick.league) pick.league = detectLeague(`${pick.event} ${pick.notes}`, pick.category)
   const missing = ['event', 'market', 'side'].filter((k) => !pick[k])
   return missing.length ? { error: `Missing ${missing.join(', ')}` } : { pick }
@@ -75,7 +89,8 @@ export function encodePick(pick) {
   const sentence =
     `Receipt: ${pick.source} picked ${pick.side} (${pick.market}) for ${pick.event} ` +
     `[${pick.category}]${pick.odds ? ` at ${pick.odds}` : ''} with ${pick.confidence}% confidence, ` +
-    `logged ${pick.loggedAt}.${pick.notes ? ` Notes: ${pick.notes}` : ''}`
+    `logged ${pick.loggedAt}.` +
+    `${pick.marketId ? ` Linked to ${pick.platform} market ${pick.marketId}.` : ''}${pick.notes ? ` Notes: ${pick.notes}` : ''}`
   return `${sentence}\n${MARKER}${JSON.stringify(pick)}`
 }
 
@@ -95,7 +110,8 @@ export function encodeGrade(pick, grade) {
   const verb = grade.result === 'push' ? 'pushed' : grade.result
   const sentence =
     `Graded: ${pick.source}'s pick ${pick.side} (${pick.market}) for ${pick.event} [${pick.league}] ${verb}` +
-    `${grade.closingOdds ? `, closing odds ${grade.closingOdds}` : ''}, graded ${grade.gradedAt}.`
+    `${grade.closingOdds ? `, closing odds ${grade.closingOdds}` : ''}, graded ${grade.gradedAt}` +
+    `${grade.auto ? `, settled automatically from the ${pick.platform} result (winner: ${grade.winner}) via Tatum` : ''}.`
   return `${sentence}\n${GRADE_MARKER}${JSON.stringify(grade)}`
 }
 
