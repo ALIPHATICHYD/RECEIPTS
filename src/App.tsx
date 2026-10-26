@@ -81,7 +81,7 @@ function StatCard({ label, value, hint, brand }: { label: string; value: string;
   return (
     <div className="p-xl rounded-md bg-secondary border border-secondary">
       <span className="text-xs text-tertiary uppercase font-semibold tracking-wider">{label}</span>
-      <div className={`text-heading-sm font-bold mt-xs ${brand ? 'text-brand-primary' : ''}`}>{value}</div>
+      <div className={`text-heading-sm font-bold mt-xs truncate ${brand ? 'text-brand-primary' : ''}`} title={value}>{value}</div>
       <div className="text-xs text-secondary mt-xxs">{hint}</div>
     </div>
   );
