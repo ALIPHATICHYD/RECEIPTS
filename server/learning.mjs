@@ -120,7 +120,7 @@ export async function writeCredibility(picks, pick, previous) {
   const score = scoreSource(picks, pick.source, pick.league)
   const prevTrust = previous?.trust ?? 50
   const move = score.trust === prevTrust ? `stays at ${score.trust}` : `moved from ${prevTrust} to ${score.trust}`
-  const verb = pick.status === 'push' ? 'pushed' : pick.status
+  const verb = pick.status === 'push' ? 'pushed' : pick.status === 'pending' ? 'had its grade withdrawn' : pick.status
   const sentence =
     `Credibility update: ${score.source} on ${score.league} ${move} after ${pick.event} (${pick.side}) ${verb}. ` +
     `Record ${score.won}W-${score.lost}L-${score.push}P over ${plural(score.n, 'graded pick')}, ${pct(score.roi)} ROI` +

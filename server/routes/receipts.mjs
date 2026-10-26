@@ -103,6 +103,7 @@ router.post('/picks/:id/grade', async (req, res) => {
     const state = await loadState()
     const pick = state.picks.find((p) => p.id === req.params.id)
     if (!pick) return res.status(404).json({ error: 'Pick not found in memory' })
+    if (result === 'pending' && pick.status === 'pending') return res.status(400).json({ error: 'This pick is already open' })
     const grade = { pickId: pick.id, result, closingOdds: closingOdds || null, gradedAt: new Date().toISOString() }
     res.status(202).json(await gradeAndLearn(state, pick, grade))
   } catch (err) {

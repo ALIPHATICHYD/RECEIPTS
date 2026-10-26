@@ -34,6 +34,7 @@ import {
   type Advice,
   type CredibilityRecord,
   type ProfileData,
+  type GradeResult,
   type PredictionMarket,
   type Trader,
   type LivePrice,
@@ -149,7 +150,7 @@ function AdviceList({ advice }: { advice: Advice[] }) {
   );
 }
 
-function GradeButtons({ busy, onGrade }: { busy: boolean; onGrade: (r: 'won' | 'lost' | 'push') => void }) {
+function GradeButtons({ busy, onGrade, current, onCancel }: { busy: boolean; onGrade: (r: GradeResult) => void; current?: PickRecord['status']; onCancel?: () => void }) {
   if (busy) {
     return (
       <span className="text-xs text-tertiary flex items-center gap-xxs">
@@ -163,6 +164,14 @@ function GradeButtons({ busy, onGrade }: { busy: boolean; onGrade: (r: 'won' | '
       <button onClick={() => onGrade('won')} className={`${btn} border-utility-success-200 bg-utility-success-50 text-utility-success-700`}>Won</button>
       <button onClick={() => onGrade('lost')} className={`${btn} border-utility-error-200 bg-utility-error-50 text-utility-error-700`}>Lost</button>
       <button onClick={() => onGrade('push')} className={`${btn} border-secondary bg-tertiary text-secondary`}>Push</button>
+      {current && current !== 'pending' && (
+        <button onClick={() => onGrade('pending')} className={`${btn} border-secondary bg-tertiary text-secondary`} title="Withdraw the grade and mark the pick open again">
+          Reopen
+        </button>
+      )}
+      {onCancel && (
+        <button onClick={onCancel} className="px-xs text-xs text-tertiary underline">Cancel</button>
+      )}
     </div>
   );
 }
@@ -204,6 +213,7 @@ export default function App() {
   const [formError, setFormError] = useState<string | null>(null);
 
   const [gradingId, setGradingId] = useState<string | null>(null);
+  const [regradeId, setRegradeId] = useState<string | null>(null);
   const [learned, setLearned] = useState<string[] | null>(null);
   const [credBoard, setCredBoard] = useState<CredibilityRecord[]>([]);
   const [credHistory, setCredHistory] = useState<CredibilityRecord[]>([]);
@@ -296,8 +306,9 @@ export default function App() {
     if (activeTab === 'sources' || activeTab === 'memory') loadLearning();
   }, [activeTab, loadLearning]);
 
-  const handleGrade = async (pick: PickRecord, result: 'won' | 'lost' | 'push') => {
+  const handleGrade = async (pick: PickRecord, result: GradeResult) => {
     setGradingId(pick.id);
+    setRegradeId(null);
     setPicksError(null);
     try {
       const res = await api.gradePick(pick.id, result);
@@ -675,6 +686,19 @@ export default function App() {
                         <GradeButtons busy={gradingId === pick.id} onGrade={(result) => handleGrade(pick, result)} />
                       )}
                       {pick.grade?.blobId && <ProofLink url={pick.grade.explorerUrl} blobId={pick.grade.blobId} />}
+                      {pick.status !== 'pending' &&
+                        (regradeId === pick.id || gradingId === pick.id ? (
+                          <GradeButtons
+                            busy={gradingId === pick.id}
+                            current={pick.status}
+                            onGrade={(result) => handleGrade(pick, result)}
+                            onCancel={() => setRegradeId(null)}
+                          />
+                        ) : (
+                          <button onClick={() => setRegradeId(pick.id)} className="text-xs text-tertiary underline" title="Graded by mistake? Change it. The correction is saved as a new memory.">
+                            Change grade
+                          </button>
+                        ))}
                     </div>
                   </div>
                 </div>

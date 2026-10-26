@@ -1,5 +1,7 @@
 export type Category = 'Sports' | 'Polymarket' | 'Crypto' | 'Macro';
 export type PickStatus = 'pending' | 'won' | 'lost' | 'push';
+// 'pending' as a grade reopens a settled pick.
+export type GradeResult = PickStatus;
 
 export interface PickRecord {
   id: string;
@@ -149,7 +151,7 @@ export const api = {
   jobStatus: (jobId: string) => call<JobStatus>(`/api/picks/jobs/${encodeURIComponent(jobId)}`),
   parseTip: (text: string, source?: string) =>
     call<{ draft: PickInput }>('/api/picks/parse', { method: 'POST', body: JSON.stringify({ text, source }) }),
-  gradePick: (id: string, result: 'won' | 'lost' | 'push', closingOdds?: string) =>
+  gradePick: (id: string, result: GradeResult, closingOdds?: string) =>
     call<{ jobId: string; credibility: string; trust: number; prevTrust: number; patterns: string[] }>(
       `/api/picks/${encodeURIComponent(id)}/grade`,
       { method: 'POST', body: JSON.stringify({ result, closingOdds }) },

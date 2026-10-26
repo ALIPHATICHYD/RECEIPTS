@@ -8,7 +8,9 @@ const MARKER = 'RECEIPTS_PICK_V1 '
 const GRADE_MARKER = 'RECEIPTS_GRADE_V1 '
 
 export const CATEGORIES = ['Sports', 'Polymarket', 'Crypto', 'Macro']
-export const RESULTS = ['won', 'lost', 'push']
+// 'pending' reopens a pick: it withdraws an earlier grade (a misclick, a
+// voided game) with a new memory rather than deleting anything.
+export const RESULTS = ['won', 'lost', 'push', 'pending']
 
 // Credibility is tracked per source and league, because a sharp NBA voice can be
 // useless on the Premier League. Picks without a known league fall back to category.
@@ -143,7 +145,7 @@ export function decodePick(text) {
 // A grade is its own memory. The pick record is never rewritten; the newest grade
 // for a pick id decides its status.
 export function encodeGrade(pick, grade) {
-  const verb = grade.result === 'push' ? 'pushed' : grade.result
+  const verb = grade.result === 'push' ? 'pushed' : grade.result === 'pending' ? 'reopened, withdrawing its earlier grade' : grade.result
   const sentence =
     `Graded: ${pick.source}'s pick ${pick.side} (${pick.market}) for ${pick.event} [${pick.league}] ${verb}` +
     `${grade.closingOdds ? `, closing odds ${grade.closingOdds}` : ''}, graded ${grade.gradedAt}` +
