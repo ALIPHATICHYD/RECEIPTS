@@ -26,8 +26,8 @@ Built for the Tatum x Walrus **Total Recall** hackathon (Track 01: Markets & Spo
   - The agent reads the terms and checks the source's remembered trust in that league against your bar and price limit. If both pass, it pays from its own Sui wallet, retries with an `X-PAYMENT` header holding the transaction digest, and logs the revealed pick.
   - The server checks the payment through **Tatum's Sui RPC** before releasing the pick: the transaction succeeded, enough USDC reached the seller, it landed after the offer was created, and the digest hasn't been used before.
   - Every decision, paid or skipped, becomes a Walrus memory with the reason.
-  - Visitors can buy a sealed pick themselves: **Connect wallet** (any Sui wallet, via dApp Kit), then **Buy with my wallet** pays the same x402 terms from their wallet. Their wallet reads Sui through the server's Tatum relay (`POST /api/sui-rpc`, reads and signed-transaction execution only), so no RPC key reaches the browser. A visitor's pick is shown only to them, not added to the owner's journal.
-- **Sui wallet reader** for SUI and USDC balances through the Tatum Sui Mainnet RPC gateway.
+  - Visitors can buy a sealed pick themselves: **Connect wallet** (any Sui wallet, via dApp Kit), then **Buy with my wallet** pays the same x402 terms from their wallet. Their wallet reads Sui through the server's Tatum relay (`/api/sui-grpc`, which turns the browser's gRPC-web calls into native gRPC to Tatum; reads, simulation and signed-transaction execution only), so no RPC key reaches the browser. A visitor's pick is shown only to them, not added to the owner's journal.
+- **Sui wallet reader** for SUI and USDC balances through the Tatum Sui Mainnet gRPC gateway.
 
 
 ## How memory is used
@@ -82,6 +82,7 @@ React + TypeScript + Vite + Tailwind, served by one Express process (`server/ind
 - `server/learning.mjs`: grading, credibility scores, patterns and advice
 - `server/routes/receipts.mjs`: picks, grading, credibility, profile and memory API
 - `src/WalletBuy.tsx`: wallet connect and buying a sealed pick from the visitor's own wallet
+- `server/sui-grpc.mjs`: Sui gRPC through Tatum's `sui-mainnet-grpc` gateway (Sui has switched JSON-RPC off on mainnet), plus the gRPC-web relay for browsers
 - `server/sui-payments.mjs`, `server/offers.mjs`, `server/routes/x402.mjs`: x402 sealed picks, the paying agent, and payment verification via Tatum Sui RPC
 - `server/prediction.mjs`, `server/routes/prediction.mjs`: Tatum Prediction Market API (search, live prices, top traders, settlement)
 - `server/routes/tatum.mjs`, `server/tatum-client.mjs`: Tatum Sui RPC

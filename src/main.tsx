@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { DAppKitProvider, createDAppKit } from '@mysten/dapp-kit-react'
-import { SuiJsonRpcClient, JsonRpcHTTPTransport } from '@mysten/sui/jsonRpc'
+import { SuiGrpcClient } from '@mysten/sui/grpc'
 import App from './App.tsx'
 import './index.css'
 
@@ -17,7 +17,7 @@ async function start() {
   const dAppKit = createDAppKit({
     networks: [network],
     defaultNetwork: network,
-    createClient: (n) => new SuiJsonRpcClient({ network: n, transport: new JsonRpcHTTPTransport({ url: `${location.origin}/api/sui-rpc` }) }),
+    createClient: (n) => new SuiGrpcClient({ network: n, baseUrl: `${location.origin}/api/sui-grpc`, format: 'binary' }),
   })
 
   createRoot(document.getElementById('root')!).render(

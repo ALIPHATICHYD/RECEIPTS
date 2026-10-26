@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { memwal, NAMESPACES } from '../memwal-client.mjs'
 import { validatePickInput, encodePick } from '../picks.mjs'
 import { loadCredibility, credKey, recallAll, proof } from '../learning.mjs'
@@ -17,7 +17,7 @@ import {
   PaymentConfigError,
 } from '../sui-payments.mjs'
 import { sendError } from './receipts.mjs'
-import { tatumRpc } from '../tatum-client.mjs'
+import { relayGrpcWeb } from '../sui-grpc.mjs'
 
 const router = Router()
 const PAY_MARKER = 'RECEIPTS_PAY_V1 '
@@ -41,21 +41,15 @@ router.get('/x402/config', (_req, res) => {
   res.json({ network: paymentsNetwork(), mock: paymentsMock(), usdcType: usdcType() })
 })
 
-// Sui JSON-RPC for browser wallets, relayed to the Tatum gateway so the API key
-// stays on the server. Only reads, dry runs and executing an already-signed
-// transaction are allowed.
-const RPC_ALLOWED = /^(sui_get|suix_get|sui_multiGet|sui_tryGet|sui_dryRun|sui_devInspect|sui_executeTransactionBlock$|suix_resolve|suix_queryEvents$|sui_getChainIdentifier$)/
-router.post('/sui-rpc', async (req, res) => {
-  const calls = Array.isArray(req.body) ? req.body : [req.body]
-  if (!calls.length || calls.length > 20 || calls.some((c) => typeof c?.method !== 'string' || !RPC_ALLOWED.test(c.method))) {
-    return res.status(403).json({ jsonrpc: '2.0', id: req.body?.id ?? null, error: { code: -32601, message: 'Method not allowed through this relay' } })
-  }
-  try {
-    const upstream = await tatumRpc('sui', req.body, paymentsNetwork())
-    res.status(upstream.status).type('application/json').send(await upstream.text())
-  } catch (err) {
-    fail(res, err, 'Sui RPC relay failed')
-  }
+// Sui gRPC-web for browser wallets, relayed to Tatum's Sui gRPC gateway as native gRPC so the
+// API key stays on the server. Reads, simulation and executing an already-signed
+// transaction only; streaming subscriptions are not relayed.
+const GRPC_ALLOWED = /^sui\.rpc\.v2\.(LedgerService|StateService|MovePackageService|NameService|SignatureVerificationService|TransactionExecutionService)\/[A-Za-z]+$/
+router.post('/sui-grpc/:method(*)', express.raw({ type: () => true, limit: '1mb' }), (req, res) => {
+  const method = req.params.method
+  if (!GRPC_ALLOWED.test(method)) return res.status(403).set('grpc-status', '7').set('grpc-message', 'Method not allowed through this relay').end()
+  if (!process.env.TATUM_API_KEY) return res.status(503).set('grpc-status', '14').set('grpc-message', 'TATUM_API_KEY is not set').end()
+  relayGrpcWeb(paymentsNetwork(), method, req.body, res)
 })
 
 router.get('/x402/offers', (_req, res) => {
