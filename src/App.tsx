@@ -19,6 +19,9 @@ import {
   Link2,
   UserPlus,
   Search,
+  Bot,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import {
   api,
@@ -38,11 +41,15 @@ import {
   type PredictionMarket,
   type Trader,
   type LivePrice,
+  type SealedOffer,
+  type SealInput,
+  type AgentDecision,
+  type BuyResult,
   pct,
   usd,
 } from './api';
 
-type Tab = 'feed' | 'log' | 'sources' | 'memory' | 'wallet';
+type Tab = 'feed' | 'log' | 'sources' | 'agent' | 'memory' | 'wallet';
 type FeedFilter = 'all' | Category;
 
 const MAINNET_MEMORY_GOAL = 10;
@@ -57,6 +64,8 @@ const EMPTY_FORM: PickInput = {
   confidence: 70,
   notes: '',
 };
+
+const EMPTY_SEAL: SealInput = { source: '@', event: '', teaser: '', market: '', side: '', odds: '', price: '0.05', payTo: '' };
 
 const inputClass =
   'w-full px-md py-sm rounded-md bg-tertiary border border-secondary text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring';
@@ -234,6 +243,20 @@ export default function App() {
   const [followingWallet, setFollowingWallet] = useState<string | null>(null);
   const [predictionError, setPredictionError] = useState<string | null>(null);
 
+  const [offers, setOffers] = useState<SealedOffer[]>([]);
+  const [paymentsMock, setPaymentsMock] = useState(false);
+  const [agentWallet, setAgentWallet] = useState<{ address: string; network: string; sui: string; usdc: string } | null>(null);
+  const [walletSetupError, setWalletSetupError] = useState<string | null>(null);
+  const [decisions, setDecisions] = useState<AgentDecision[]>([]);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [minTrust, setMinTrust] = useState('55');
+  const [maxPrice, setMaxPrice] = useState('0.25');
+  const [buyingId, setBuyingId] = useState<string | null>(null);
+  const [buyResults, setBuyResults] = useState<Record<string, BuyResult>>({});
+  const [sealForm, setSealForm] = useState<SealInput>(EMPTY_SEAL);
+  const [sealing, setSealing] = useState(false);
+  const [showSeal, setShowSeal] = useState(false);
+
   const [memories, setMemories] = useState<MemoryRow[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
   const [memoriesError, setMemoriesError] = useState<string | null>(null);
@@ -303,8 +326,59 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'sources' || activeTab === 'memory') loadLearning();
+    if (activeTab === 'sources' || activeTab === 'memory' || activeTab === 'agent') loadLearning();
   }, [activeTab, loadLearning]);
+
+  const loadAgent = useCallback(async () => {
+    setAgentError(null);
+    const [o, w, d] = await Promise.allSettled([api.offers(), api.agentWallet(), api.agentDecisions()]);
+    if (o.status === 'fulfilled') {
+      setOffers(o.value.offers);
+      setPaymentsMock(o.value.mock);
+    } else setAgentError(o.reason.message);
+    if (w.status === 'fulfilled') {
+      setAgentWallet(w.value);
+      setWalletSetupError(null);
+    } else setWalletSetupError(w.reason.message);
+    if (d.status === 'fulfilled') setDecisions(d.value.records);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'agent') loadAgent();
+  }, [activeTab, loadAgent]);
+
+  const handleBuy = async (offer: SealedOffer) => {
+    setBuyingId(offer.id);
+    setAgentError(null);
+    try {
+      const res = await api.agentBuy(offer.id, Number(minTrust) || 0, maxPrice || '0');
+      setBuyResults((r) => ({ ...r, [offer.id]: res }));
+      setLearned([res.sentence]);
+      if (res.pick) setPicks((prev) => [res.pick as PickRecord, ...prev]);
+      setTimeout(loadAgent, 3000);
+    } catch (err: any) {
+      setAgentError(err.message);
+    } finally {
+      setBuyingId(null);
+    }
+  };
+
+  const handleSeal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSealing(true);
+    setAgentError(null);
+    try {
+      const res = await api.sealPick(sealForm);
+      setOffers((prev) => [res.offer, ...prev]);
+      setSealForm({ ...EMPTY_SEAL, source: sealForm.source, payTo: sealForm.payTo });
+      setShowSeal(false);
+      setNotice(`Sealed ${res.offer.source}'s pick. Its commitment is on Walrus now, and the pick itself stays hidden until someone pays.`);
+    } catch (err: any) {
+      setAgentError(err.message);
+    } finally {
+      setSealing(false);
+    }
+  };
 
   const handleGrade = async (pick: PickRecord, result: GradeResult) => {
     setGradingId(pick.id);
@@ -516,6 +590,7 @@ export default function App() {
             <NavButton active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={TrendingUp} label="Feed" />
             <NavButton active={activeTab === 'log'} onClick={() => setActiveTab('log')} icon={PlusCircle} label="Log Pick" />
             <NavButton active={activeTab === 'sources'} onClick={() => setActiveTab('sources')} icon={Users} label="Sources" />
+            <NavButton active={activeTab === 'agent'} onClick={() => setActiveTab('agent')} icon={Bot} label="Agent" />
             <NavButton active={activeTab === 'memory'} onClick={() => setActiveTab('memory')} icon={Brain} label="Memory" />
             <NavButton active={activeTab === 'wallet'} onClick={() => setActiveTab('wallet')} icon={Wallet} label="Sui Wallet" />
           </nav>
@@ -1037,6 +1112,174 @@ export default function App() {
                         {h.text}
                       </span>
                       <ProofLink url={h.explorerUrl} blobId={h.blobId} />
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= AGENT (x402) ================= */}
+        {activeTab === 'agent' && (
+          <div className="space-y-xl">
+            <div className="border-b border-secondary pb-md flex items-start justify-between gap-md">
+              <div>
+                <h1 className="text-heading-sm font-bold">Pay-per-pick agent</h1>
+                <p className="text-sm text-secondary">
+                  Tipsters seal their next pick behind an x402 paywall. Your agent pays in USDC on Sui only when the source's remembered trust clears your bar, and the payment is checked through Tatum's Sui RPC before the pick is revealed.
+                </p>
+              </div>
+              <button onClick={loadAgent} className="p-xs rounded-sm border border-secondary bg-secondary text-secondary hover:text-primary" title="Refresh">
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {paymentsMock && <div className="p-md rounded-md bg-tertiary border border-secondary text-xs text-secondary">Mock payments are on: nothing is paid on chain.</div>}
+            {agentError && <ErrorBox message={agentError} />}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-lg">
+              <div className="p-xl rounded-md bg-secondary border border-secondary space-y-sm">
+                <div className="flex items-center gap-xs text-sm font-semibold">
+                  <Wallet className="w-4 h-4 text-brand-primary" /> Agent wallet {agentWallet && <span className="text-xs text-tertiary font-normal">Sui {agentWallet.network}</span>}
+                </div>
+                {walletSetupError ? (
+                  <ErrorBox message={`${walletSetupError}. Add AGENT_SUI_PRIVATE_KEY to .env and restart the server.`} />
+                ) : agentWallet ? (
+                  <>
+                    <div className="text-xs font-mono text-secondary break-all">{agentWallet.address}</div>
+                    <div className="flex gap-xl">
+                      <div>
+                        <div className="text-heading-xs font-bold text-brand-primary">{agentWallet.usdc} USDC</div>
+                        <div className="text-xs text-tertiary">to spend on picks</div>
+                      </div>
+                      <div>
+                        <div className="text-heading-xs font-bold">{agentWallet.sui} SUI</div>
+                        <div className="text-xs text-tertiary">for gas</div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-tertiary">Loading…</p>
+                )}
+              </div>
+              <div className="p-xl rounded-md bg-secondary border border-secondary space-y-sm">
+                <div className="flex items-center gap-xs text-sm font-semibold">
+                  <Bot className="w-4 h-4 text-brand-primary" /> The agent's rule
+                </div>
+                <div className="flex flex-wrap items-center gap-xs text-xs text-secondary">
+                  <span>Pay only for sources with trust of at least</span>
+                  <input type="number" min="0" max="100" value={minTrust} onChange={(e) => setMinTrust(e.target.value)} className="w-16 px-sm py-xxs rounded-sm bg-tertiary border border-secondary text-primary" aria-label="Minimum trust" />
+                  <span>in that league, and at most</span>
+                  <input type="text" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} className="w-16 px-sm py-xxs rounded-sm bg-tertiary border border-secondary text-primary" aria-label="Maximum price" />
+                  <span>USDC per pick.</span>
+                </div>
+                <p className="text-xs text-tertiary">Every decision, paid or skipped, is written to Walrus with the reason.</p>
+              </div>
+            </div>
+
+            <div className="space-y-sm">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold">Sealed picks</h2>
+                <button onClick={() => setShowSeal((v) => !v)} className="px-md py-xs rounded-sm border border-secondary bg-secondary text-xs font-medium text-primary flex items-center gap-xxs">
+                  <Lock className="w-3.5 h-3.5" /> {showSeal ? 'Close' : 'Seal a pick (as a tipster)'}
+                </button>
+              </div>
+
+              {showSeal && (
+                <form onSubmit={handleSeal} className="p-xl rounded-md bg-secondary border border-secondary grid grid-cols-1 md:grid-cols-2 gap-md">
+                  <input className={inputClass} placeholder="Tipster handle or profile link" value={sealForm.source} onChange={(e) => setSealForm({ ...sealForm, source: e.target.value })} required />
+                  <input className={inputClass} placeholder="Event, e.g. Celtics vs Knicks" value={sealForm.event} onChange={(e) => setSealForm({ ...sealForm, event: e.target.value })} required />
+                  <input className={`${inputClass} md:col-span-2`} placeholder="Public teaser buyers see, e.g. Big edge on the spread" value={sealForm.teaser} onChange={(e) => setSealForm({ ...sealForm, teaser: e.target.value })} />
+                  <input className={inputClass} placeholder="Hidden: market, e.g. Spread" value={sealForm.market} onChange={(e) => setSealForm({ ...sealForm, market: e.target.value })} required />
+                  <input className={inputClass} placeholder="Hidden: side, e.g. Celtics -4.5" value={sealForm.side} onChange={(e) => setSealForm({ ...sealForm, side: e.target.value })} required />
+                  <input className={inputClass} placeholder="Hidden: odds, e.g. -110" value={sealForm.odds} onChange={(e) => setSealForm({ ...sealForm, odds: e.target.value })} />
+                  <input className={inputClass} placeholder="Price in USDC" value={sealForm.price} onChange={(e) => setSealForm({ ...sealForm, price: e.target.value })} />
+                  <input className={`${inputClass} md:col-span-2 font-mono`} placeholder="Pay to (Sui address). Leave empty to use SELLER_SUI_ADDRESS" value={sealForm.payTo} onChange={(e) => setSealForm({ ...sealForm, payTo: e.target.value })} />
+                  <button type="submit" disabled={sealing} className="md:col-span-2 py-sm rounded-md bg-brand-solid text-primary-on-brand text-sm font-semibold flex items-center justify-center gap-xs disabled:opacity-60">
+                    {sealing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Seal it and commit to Walrus
+                  </button>
+                </form>
+              )}
+
+              {offers.length === 0 && <p className="text-sm text-secondary">No sealed picks yet. Seal one as a tipster, then let the agent decide whether it's worth paying for.</p>}
+              {offers.map((o) => {
+                const cred = credBoard.find((c) => c.source.toLowerCase() === o.source.toLowerCase() && c.league === o.league);
+                const result = buyResults[o.id];
+                return (
+                  <div key={o.id} className="p-xl rounded-md bg-secondary border border-secondary space-y-sm">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-md">
+                      <div className="space-y-xxs">
+                        <div className="flex flex-wrap items-center gap-sm text-xs">
+                          <span className="px-xs py-xxs rounded-sm bg-tertiary border border-secondary text-secondary font-medium">{o.league}</span>
+                          <span className="font-medium text-brand-primary">{o.source}</span>
+                          {o.sourcePlatform && <span className="text-tertiary">on {o.sourcePlatform}</span>}
+                          <span className="text-tertiary">sealed {timeAgo(o.createdAt)}</span>
+                        </div>
+                        <div className="text-base font-bold">{o.event}</div>
+                        {o.teaser && <div className="text-xs text-secondary">{o.teaser}</div>}
+                        <div className="text-xs text-tertiary font-mono" title="SHA-256 of the hidden pick plus a salt, written to Walrus when sealed">commitment {shortId(o.commitment)}</div>
+                      </div>
+                      <div className="flex items-center gap-xl">
+                        <div className="text-center">
+                          <div className="text-xs text-tertiary uppercase font-medium">Trust</div>
+                          <div className="text-sm font-bold text-brand-primary">{cred ? cred.trust : '—'}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs text-tertiary uppercase font-medium">Price</div>
+                          <div className="text-sm font-bold">{o.price} USDC</div>
+                        </div>
+                        {o.unlocked ? (
+                          <span className="inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700">
+                            <Unlock className="w-3.5 h-3.5" /> Unlocked
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleBuy(o)}
+                            disabled={buyingId !== null}
+                            className="px-md py-xs rounded-md bg-brand-solid text-primary-on-brand text-xs font-semibold flex items-center gap-xxs disabled:opacity-60"
+                          >
+                            {buyingId === o.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />} Ask the agent
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {result?.decision === 'skipped' && <AdviceList advice={[{ tone: 'warn', text: `Skipped: ${result.reason}` }]} />}
+                    {o.unlocked && o.hidden && (
+                      <div className="p-md rounded-md bg-utility-success-50 border border-utility-success-200 text-xs text-utility-success-700 flex flex-wrap items-center gap-xs">
+                        <span>
+                          Pick: <strong>{o.hidden.side}</strong> ({o.hidden.market}){o.hidden.odds ? ` at ${o.hidden.odds}` : ''}. Logged to your journal.
+                        </span>
+                        <span className="opacity-80">Paid in tx</span>
+                        {o.unlocked.digest.startsWith('mock') ? (
+                          <span className="font-mono">{shortId(o.unlocked.digest)}</span>
+                        ) : (
+                          <a
+                            href={`https://suiscan.xyz/${agentWallet?.network ?? 'mainnet'}/tx/${o.unlocked.digest}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-mono underline inline-flex items-center gap-xxs"
+                          >
+                            {shortId(o.unlocked.digest)} <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {decisions.length > 0 && (
+              <div className="space-y-sm">
+                <h2 className="text-base font-bold">Why the agent paid, or didn't</h2>
+                <ol className="space-y-xs">
+                  {decisions.map((d) => (
+                    <li key={d.blobId} className="p-md rounded-md bg-secondary border border-secondary text-xs flex flex-col md:flex-row md:items-center justify-between gap-xs">
+                      <span className="text-secondary">
+                        <span className="text-tertiary">{new Date(d.recordedAt).toLocaleString()} · </span>
+                        {d.text}
+                      </span>
+                      <ProofLink url={d.explorerUrl} blobId={d.blobId} />
                     </li>
                   ))}
                 </ol>

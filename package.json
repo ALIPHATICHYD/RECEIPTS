@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file-if-exists=.env server/index.mjs",
-    "dev:mock": "MEMWAL_MOCK=1 PREDICTION_MOCK=1 node --env-file-if-exists=.env server/index.mjs",
+    "dev:mock": "MEMWAL_MOCK=1 PREDICTION_MOCK=1 PAYMENTS_MOCK=1 node --env-file-if-exists=.env server/index.mjs",
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "typecheck": "tsc --noEmit -p ."
   },

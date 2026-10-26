@@ -14,6 +14,7 @@ export const NAMESPACES = {
   grades: 'receipts-grades',
   credibility: 'receipts-credibility',
   profile: 'receipts-profile',
+  payments: 'receipts-payments',
 }
 
 const RELAYERS = {

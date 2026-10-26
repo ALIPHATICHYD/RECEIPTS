@@ -15,6 +15,7 @@ import path from 'path'
 import tatumRoutes from './routes/tatum.mjs'
 import receiptsRoutes from './routes/receipts.mjs'
 import predictionRoutes from './routes/prediction.mjs'
+import x402Routes from './routes/x402.mjs'
 import { credentialGuard } from './credential-guard.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -34,6 +35,7 @@ app.use(credentialGuard)
 
 app.use('/api/tatum', tatumRoutes)
 app.use('/api/prediction', predictionRoutes)
+app.use('/api', x402Routes)
 app.use('/api', receiptsRoutes)
 app.use('/api', tatumRoutes)
 // Unknown API paths get a JSON 404 instead of falling through to Vite's SPA

@@ -55,6 +55,56 @@ export interface Trader {
   pnl: number;
 }
 
+export interface SealedOffer {
+  id: string;
+  source: string;
+  sourceUrl?: string;
+  sourcePlatform?: string;
+  event: string;
+  teaser: string;
+  category: Category;
+  league: string;
+  price: string;
+  payTo: string;
+  commitment: string;
+  createdAt: string;
+  unlocked: { digest: string; payer: string | null; at: string } | null;
+  hidden?: { market: string; side: string; odds: string; notes: string };
+}
+
+export interface SealInput {
+  source: string;
+  event: string;
+  teaser: string;
+  market: string;
+  side: string;
+  odds: string;
+  price: string;
+  payTo: string;
+}
+
+export interface AgentDecision extends MemoryRef {
+  type: 'decision' | 'sealed';
+  offerId: string;
+  source: string;
+  league: string;
+  decision?: 'paid' | 'skipped';
+  reason?: string;
+  digest?: string;
+  price: string;
+  recordedAt: string;
+  text: string;
+}
+
+export interface BuyResult {
+  decision: 'paid' | 'skipped';
+  reason: string;
+  sentence: string;
+  digest?: string;
+  txUrl?: string | null;
+  pick?: PickRecord;
+}
+
 export interface LivePrice {
   pickId: string;
   price: number | null;
@@ -172,6 +222,12 @@ export const api = {
   livePrices: () => call<{ prices: LivePrice[] }>('/api/prediction/live'),
   settle: () =>
     call<{ checked: number; graded: { pickId: string; result: string; winner: string }[]; learned: string[] }>('/api/prediction/settle', { method: 'POST' }),
+  offers: () => call<{ network: string; mock: boolean; offers: SealedOffer[] }>('/api/x402/offers'),
+  sealPick: (input: SealInput) => call<{ offer: SealedOffer; jobId: string }>('/api/x402/offers', { method: 'POST', body: JSON.stringify(input) }),
+  agentWallet: () => call<{ address: string; network: string; mock: boolean; sui: string; usdc: string }>('/api/agent/wallet'),
+  agentDecisions: () => call<{ records: AgentDecision[] }>('/api/agent/decisions'),
+  agentBuy: (offerId: string, minTrust: number, maxPrice: string) =>
+    call<BuyResult>('/api/agent/buy', { method: 'POST', body: JSON.stringify({ offerId, minTrust, maxPrice }) }),
   suiBalance: (address: string) =>
     call<{ sui: string; usdc: string }>(`/api/sui/balance?address=${encodeURIComponent(address)}`),
 };
