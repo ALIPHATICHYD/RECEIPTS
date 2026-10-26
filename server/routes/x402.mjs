@@ -176,7 +176,7 @@ router.post('/agent/buy', async (req, res) => {
 
     let skip = null
     if (BigInt(terms.maxAmountRequired) > toAtomic(maxPrice)) skip = `price ${price} USDC is above the ${maxPrice} USDC limit`
-    else if (trust === null) skip = `${source} has no graded record on ${league} yet`
+    else if (trust === null || !cred.n) skip = `${source} has no graded record on ${league} yet`
     else if (trust < minTrust) skip = `${source}'s trust on ${league} is ${trust}, below the bar of ${minTrust}`
     if (skip) {
       const sentence = `Agent decision: skipped ${source}'s sealed ${league} pick (${price} USDC) because ${skip}.`
