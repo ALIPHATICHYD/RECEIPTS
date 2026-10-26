@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp,
   PlusCircle,
@@ -9,180 +9,225 @@ import {
   XCircle,
   Clock,
   Sparkles,
-  Search,
   ExternalLink,
-  ChevronRight,
-  Filter,
   Flame,
   Award,
-  ArrowUpRight
+  RefreshCw,
+  ClipboardPaste,
+  AlertTriangle,
+  Loader2,
 } from 'lucide-react';
+import {
+  api,
+  waitForJob,
+  sourceStats,
+  timeAgo,
+  shortId,
+  type Category,
+  type PickRecord,
+  type PickInput,
+  type MemoryRow,
+  type JobStatus,
+} from './api';
 
-interface PickItem {
-  id: string;
-  event: string;
-  market: string;
-  side: string;
-  odds: string;
-  sourceHandle: string;
-  confidence: number;
-  status: 'pending' | 'won' | 'lost';
-  time: string;
-  notes?: string;
-  category: string;
+type Tab = 'feed' | 'log' | 'sources' | 'memory' | 'wallet';
+type FeedFilter = 'all' | Category;
+
+const MAINNET_MEMORY_GOAL = 10;
+
+const EMPTY_FORM: PickInput = {
+  event: '',
+  market: '',
+  side: '',
+  odds: '',
+  source: '@',
+  category: 'Sports',
+  confidence: 70,
+  notes: '',
+};
+
+const inputClass =
+  'w-full px-md py-sm rounded-md bg-tertiary border border-secondary text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring';
+
+function NavButton({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: typeof Flame; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={`px-md sm:px-lg py-xs rounded-sm text-sm font-medium transition-colors flex items-center gap-xs ${
+        active ? 'bg-secondary text-primary shadow-xs' : 'text-secondary hover:text-primary hover:bg-secondary-hover'
+      }`}
+    >
+      <Icon className="w-4 h-4" />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
 }
 
-interface SourceLeader {
-  rank: number;
-  handle: string;
-  platform: string;
-  winRate: number;
-  roi: number;
-  totalPicks: number;
-  streak: string;
+function StatCard({ label, value, hint, brand }: { label: string; value: string; hint: string; brand?: boolean }) {
+  return (
+    <div className="p-xl rounded-md bg-secondary border border-secondary">
+      <span className="text-xs text-tertiary uppercase font-semibold tracking-wider">{label}</span>
+      <div className={`text-heading-sm font-bold mt-xs ${brand ? 'text-brand-primary' : ''}`}>{value}</div>
+      <div className="text-xs text-secondary mt-xxs">{hint}</div>
+    </div>
+  );
 }
 
-interface MemoryNote {
-  id: string;
-  title: string;
-  date: string;
-  insight: string;
-  tags: string[];
+function StatusBadge({ status }: { status: PickRecord['status'] }) {
+  if (status === 'won')
+    return (
+      <span className="inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700">
+        <CheckCircle2 className="w-3.5 h-3.5 text-fg-success-primary" /> Won
+      </span>
+    );
+  if (status === 'lost')
+    return (
+      <span className="inline-flex items-center gap-xs rounded-full border border-utility-error-200 bg-utility-error-50 px-md py-xxs text-xs font-medium text-utility-error-700">
+        <XCircle className="w-3.5 h-3.5 text-fg-error-primary" /> Lost
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center gap-xs rounded-full border border-secondary bg-tertiary px-md py-xxs text-xs font-medium text-secondary">
+      <Clock className="w-3.5 h-3.5 text-fg-tertiary" /> {status === 'push' ? 'Push' : 'Open'}
+    </span>
+  );
+}
+
+function ProofLink({ url, blobId }: { url?: string | null; blobId?: string | null }) {
+  if (!blobId) return null;
+  if (!url) return <span className="text-xs font-mono text-tertiary">{shortId(blobId)}</span>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="text-xs font-mono text-brand-primary inline-flex items-center gap-xxs hover:underline">
+      {shortId(blobId)} <ExternalLink className="w-3 h-3" />
+    </a>
+  );
+}
+
+function ErrorBox({ message }: { message: string }) {
+  return (
+    <div className="p-md rounded-md bg-utility-error-50 border border-utility-error-200 text-utility-error-700 text-xs flex items-start gap-xs">
+      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'feed' | 'log' | 'sources' | 'memory' | 'wallet'>('feed');
-  const [walletAddress, setWalletAddress] = useState('0x7e8b912c478a5e81d77a06f3630f9a562473850cb05ef2ebf4c5a7536d76bb30');
+  const [activeTab, setActiveTab] = useState<Tab>('feed');
+  const [network, setNetwork] = useState<string>('…');
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+
+  const [picks, setPicks] = useState<PickRecord[]>([]);
+  const [picksLoading, setPicksLoading] = useState(true);
+  const [picksError, setPicksError] = useState<string | null>(null);
+  const [feedFilter, setFeedFilter] = useState<FeedFilter>('all');
+
+  const [form, setForm] = useState<PickInput>(EMPTY_FORM);
+  const [tipText, setTipText] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveJob, setSaveJob] = useState<JobStatus | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const [memories, setMemories] = useState<MemoryRow[]>([]);
+  const [memoriesLoading, setMemoriesLoading] = useState(false);
+  const [memoriesError, setMemoriesError] = useState<string | null>(null);
+
+  const [walletAddress, setWalletAddress] = useState('');
   const [suiBalance, setSuiBalance] = useState<string | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
   const [isLoadingWallet, setIsLoadingWallet] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
 
-  // Form state for logging a pick
-  const [formEvent, setFormEvent] = useState('');
-  const [formMarket, setFormMarket] = useState('');
-  const [formSide, setFormSide] = useState('');
-  const [formOdds, setFormOdds] = useState('');
-  const [formSource, setFormSource] = useState('@');
-  const [formConfidence, setFormConfidence] = useState(70);
-  const [formCategory, setFormCategory] = useState('Sports');
-  const [formNotes, setFormNotes] = useState('');
-  const [logSuccess, setLogSuccess] = useState(false);
-
-  // Feed filter
-  const [feedFilter, setFeedFilter] = useState<'all' | 'sports' | 'crypto' | 'polymarket'>('all');
-
-  const [picks, setPicks] = useState<PickItem[]>([
-    {
-      id: '1',
-      event: 'Boston Celtics vs NY Knicks',
-      market: 'Moneyline',
-      side: 'Celtics -4.5',
-      odds: '-110',
-      sourceHandle: '@StatViper',
-      confidence: 85,
-      status: 'pending',
-      time: 'Tonight 7:30 PM',
-      category: 'Sports',
-      notes: 'Tatum returned to practice, heavy sharp action on Boston'
-    },
-    {
-      id: '2',
-      event: 'BTC > $100k by End of Month',
-      market: 'Polymarket Binary',
-      side: 'YES',
-      odds: '0.68',
-      sourceHandle: '@PredictorWhale',
-      confidence: 78,
-      status: 'pending',
-      time: 'Closes in 6 days',
-      category: 'Polymarket',
-      notes: 'Spot ETF weekly inflows at 4-month high'
-    },
-    {
-      id: '3',
-      event: 'Arsenal vs Real Madrid',
-      market: 'Both Teams to Score',
-      side: 'YES',
-      odds: '-125',
-      sourceHandle: '@FootyAlpha',
-      confidence: 65,
-      status: 'won',
-      time: 'Yesterday',
-      category: 'Sports',
-      notes: 'Hits in 8 of last 9 UCL fixtures'
-    },
-    {
-      id: '4',
-      event: 'Fed Rate Cut 25bps in June',
-      market: 'Prediction Market',
-      side: 'NO',
-      odds: '0.42',
-      sourceHandle: '@MacroJunkie',
-      confidence: 90,
-      status: 'lost',
-      time: '2 days ago',
-      category: 'Crypto',
-      notes: 'CPI print cooled higher than consensus'
+  const loadPicks = useCallback(async () => {
+    setPicksLoading(true);
+    setPicksError(null);
+    try {
+      const data = await api.listPicks();
+      setPicks(data.picks);
+      setNetwork(data.network);
+    } catch (err: any) {
+      setPicksError(err.message);
+    } finally {
+      setPicksLoading(false);
     }
-  ]);
+  }, []);
 
-  const sources: SourceLeader[] = [
-    { rank: 1, handle: '@PredictorWhale', platform: 'Polymarket / X', winRate: 74.2, roi: 31.8, totalPicks: 142, streak: 'W5' },
-    { rank: 2, handle: '@StatViper', platform: 'Action / Discord', winRate: 68.5, roi: 24.1, totalPicks: 310, streak: 'W2' },
-    { rank: 3, handle: '@FootyAlpha', platform: 'Telegram', winRate: 64.0, roi: 18.9, totalPicks: 89, streak: 'W3' },
-    { rank: 4, handle: '@MacroJunkie', platform: 'Substack', winRate: 58.7, roi: 11.2, totalPicks: 64, streak: 'L1' },
-    { rank: 5, handle: '@SharpEdgeBets', platform: 'X / Twitter', winRate: 55.4, roi: 8.6, totalPicks: 520, streak: 'W1' }
-  ];
-
-  const memories: MemoryNote[] = [
-    {
-      id: 'm1',
-      title: 'Fade Public Overreactions on Back-to-Backs',
-      date: 'May 12, 2026',
-      insight: 'NBA road teams playing 3 in 4 nights cover the spread 38% of the time when listed as underdogs of 3 points or fewer.',
-      tags: ['NBA', 'Fatigue-Model', 'System']
-    },
-    {
-      id: 'm2',
-      title: 'Polymarket Resolution Dispute Guardrails',
-      date: 'May 08, 2026',
-      insight: 'Avoid binary outcomes with ambiguous UMA oracle clauses within 12 hours of scheduled resolution.',
-      tags: ['Crypto', 'Polymarket', 'Risk']
-    },
-    {
-      id: 'm3',
-      title: 'Tipster @StatViper Sharp Line Moves',
-      date: 'Apr 29, 2026',
-      insight: 'Line moves within 4 minutes of @StatViper posting in Discord. Always set push notification or place limit bets.',
-      tags: ['Execution', 'Sources']
+  const loadMemories = useCallback(async () => {
+    setMemoriesLoading(true);
+    setMemoriesError(null);
+    try {
+      const data = await api.listMemories();
+      setMemories(data.memories);
+      setNetwork(data.network);
+    } catch (err: any) {
+      setMemoriesError(err.message);
+    } finally {
+      setMemoriesLoading(false);
     }
-  ];
+  }, []);
 
-  const handleCreatePick = (e: React.FormEvent) => {
+  useEffect(() => {
+    api
+      .memoryStatus()
+      .then((s) => {
+        setNetwork(s.network);
+        if (!s.configured || s.error) setMemoryError(s.error ?? 'Walrus Memory is not configured');
+      })
+      .catch((err) => setMemoryError(err.message));
+    loadPicks();
+  }, [loadPicks]);
+
+  useEffect(() => {
+    if (activeTab === 'memory') loadMemories();
+  }, [activeTab, loadMemories]);
+
+  const stats = useMemo(() => sourceStats(picks), [picks]);
+  const graded = picks.filter((p) => p.status === 'won' || p.status === 'lost');
+  const won = picks.filter((p) => p.status === 'won').length;
+  const pending = picks.filter((p) => p.status === 'pending').length;
+  const busiest = [...stats].sort((a, b) => b.total - a.total)[0];
+  const filteredPicks = picks.filter((p) => feedFilter === 'all' || p.category === feedFilter);
+
+  const updateForm = <K extends keyof PickInput>(key: K, value: PickInput[K]) => setForm((f) => ({ ...f, [key]: value }));
+
+  const handleParseTip = async () => {
+    if (!tipText.trim()) return;
+    setParsing(true);
+    setFormError(null);
+    try {
+      const { draft } = await api.parseTip(tipText, form.source.replace(/^@$/, ''));
+      setForm((f) => ({ ...f, ...Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== '' && v !== null)) }));
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const handleCreatePick = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formEvent || !formMarket || !formSide) return;
-    const newPick: PickItem = {
-      id: Date.now().toString(),
-      event: formEvent,
-      market: formMarket,
-      side: formSide,
-      odds: formOdds || '+100',
-      sourceHandle: formSource.startsWith('@') ? formSource : `@${formSource}`,
-      confidence: formConfidence,
-      status: 'pending',
-      time: 'Just now',
-      category: formCategory,
-      notes: formNotes
-    };
-    setPicks([newPick, ...picks]);
-    setFormEvent('');
-    setFormMarket('');
-    setFormSide('');
-    setFormOdds('');
-    setFormNotes('');
-    setLogSuccess(true);
-    setTimeout(() => setLogSuccess(false), 3000);
+    setSaving(true);
+    setSaveJob(null);
+    setFormError(null);
+    try {
+      const { pick, jobId } = await api.logPick(form);
+      setPicks((prev) => [pick, ...prev]);
+      setForm({ ...EMPTY_FORM, source: form.source, category: form.category });
+      setTipText('');
+      const final = await waitForJob(jobId, setSaveJob);
+      if (final.status === 'done') {
+        setPicks((prev) => prev.map((p) => (p.id === pick.id ? { ...p, blobId: final.blobId ?? undefined, explorerUrl: final.explorerUrl } : p)));
+      } else if (final.status === 'failed') {
+        setFormError(final.error ?? 'Walrus Memory could not store this pick');
+      }
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const fetchWallet = async () => {
@@ -190,11 +235,7 @@ export default function App() {
     setIsLoadingWallet(true);
     setWalletError(null);
     try {
-      const res = await fetch(`/api/sui/balance?address=${encodeURIComponent(walletAddress.trim())}`);
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to fetch balance');
-      }
+      const data = await api.suiBalance(walletAddress.trim());
       setSuiBalance(data.sui);
       setUsdcBalance(data.usdc);
     } catch (err: any) {
@@ -204,183 +245,95 @@ export default function App() {
     }
   };
 
-  const filteredPicks = picks.filter((p) => {
-    if (feedFilter === 'all') return true;
-    if (feedFilter === 'sports') return p.category.toLowerCase() === 'sports';
-    if (feedFilter === 'polymarket') return p.category.toLowerCase() === 'polymarket';
-    if (feedFilter === 'crypto') return p.category.toLowerCase() === 'crypto';
-    return true;
-  });
+  const networkLabel = network === 'mainnet' ? 'Walrus Mainnet' : network === 'testnet' ? 'Walrus Testnet' : network === 'mock' ? 'Mock memory' : 'Connecting…';
 
   return (
     <div className="min-h-screen bg-primary text-primary font-sans antialiased selection:bg-brand-solid selection:text-primary-on-brand flex flex-col">
-      {/* Top Navbar */}
       <header className="border-b border-secondary bg-secondary sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-xl py-lg flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-xl py-lg flex items-center justify-between gap-md">
           <div className="flex items-center gap-md">
             <div className="w-10 h-10 rounded-md bg-brand-solid flex items-center justify-center shadow-xs">
               <Flame className="w-5 h-5 text-primary-on-brand" />
             </div>
-            <div>
+            <div className="hidden md:block">
               <div className="flex items-center gap-xs">
                 <span className="text-heading-xs font-bold tracking-tight">Receipts</span>
                 <span className="px-xs py-xxs rounded-sm bg-utility-brand-50 border border-utility-brand-200 text-utility-brand-700 text-xs font-semibold">
                   Pick Journal
                 </span>
               </div>
-              <p className="text-xs text-tertiary">Sports &amp; Prediction Markets Tracker</p>
+              <p className="text-xs text-tertiary">Remembers who was actually right</p>
             </div>
           </div>
 
-          {/* Navigation Bar */}
           <nav className="flex items-center gap-xs bg-tertiary p-xxs rounded-md border border-secondary">
-            <button
-              onClick={() => setActiveTab('feed')}
-              className={`px-lg py-xs rounded-sm text-sm font-medium transition-colors flex items-center gap-xs ${
-                activeTab === 'feed'
-                  ? 'bg-secondary text-primary shadow-xs'
-                  : 'text-secondary hover:text-primary hover:bg-secondary-hover'
-              }`}
-            >
-              <TrendingUp className="w-4 h-4" />
-              Feed
-            </button>
-            <button
-              onClick={() => setActiveTab('log')}
-              className={`px-lg py-xs rounded-sm text-sm font-medium transition-colors flex items-center gap-xs ${
-                activeTab === 'log'
-                  ? 'bg-secondary text-primary shadow-xs'
-                  : 'text-secondary hover:text-primary hover:bg-secondary-hover'
-              }`}
-            >
-              <PlusCircle className="w-4 h-4" />
-              Log Pick
-            </button>
-            <button
-              onClick={() => setActiveTab('sources')}
-              className={`px-lg py-xs rounded-sm text-sm font-medium transition-colors flex items-center gap-xs ${
-                activeTab === 'sources'
-                  ? 'bg-secondary text-primary shadow-xs'
-                  : 'text-secondary hover:text-primary hover:bg-secondary-hover'
-              }`}
-            >
-              <Users className="w-4 h-4" />
-              Sources
-            </button>
-            <button
-              onClick={() => setActiveTab('memory')}
-              className={`px-lg py-xs rounded-sm text-sm font-medium transition-colors flex items-center gap-xs ${
-                activeTab === 'memory'
-                  ? 'bg-secondary text-primary shadow-xs'
-                  : 'text-secondary hover:text-primary hover:bg-secondary-hover'
-              }`}
-            >
-              <Brain className="w-4 h-4" />
-              Memory
-            </button>
-            <button
-              onClick={() => setActiveTab('wallet')}
-              className={`px-lg py-xs rounded-sm text-sm font-medium transition-colors flex items-center gap-xs ${
-                activeTab === 'wallet'
-                  ? 'bg-secondary text-primary shadow-xs'
-                  : 'text-secondary hover:text-primary hover:bg-secondary-hover'
-              }`}
-            >
-              <Wallet className="w-4 h-4" />
-              Sui Wallet
-            </button>
+            <NavButton active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={TrendingUp} label="Feed" />
+            <NavButton active={activeTab === 'log'} onClick={() => setActiveTab('log')} icon={PlusCircle} label="Log Pick" />
+            <NavButton active={activeTab === 'sources'} onClick={() => setActiveTab('sources')} icon={Users} label="Sources" />
+            <NavButton active={activeTab === 'memory'} onClick={() => setActiveTab('memory')} icon={Brain} label="Memory" />
+            <NavButton active={activeTab === 'wallet'} onClick={() => setActiveTab('wallet')} icon={Wallet} label="Sui Wallet" />
           </nav>
 
-          {/* Quick wallet status badge */}
           <div className="hidden lg:flex items-center gap-sm">
             <div className="px-md py-xs rounded-md bg-tertiary border border-secondary text-xs flex items-center gap-xs">
-              <span className="w-2 h-2 rounded-full bg-brand-solid animate-pulse"></span>
-              <span className="text-secondary font-medium">Sui Mainnet</span>
+              <span className={`w-2 h-2 rounded-full ${memoryError ? 'bg-error-secondary' : 'bg-brand-solid animate-pulse'}`}></span>
+              <span className="text-secondary font-medium">{networkLabel}</span>
             </div>
           </div>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-xl py-2xl">
-        {/* ================= FEED VIEW ================= */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-xl py-2xl space-y-xl">
+        {memoryError && <ErrorBox message={`Walrus Memory: ${memoryError}`} />}
+
+        {/* ================= FEED ================= */}
         {activeTab === 'feed' && (
           <div className="space-y-2xl">
-            {/* Top stats bar */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-lg">
-              <div className="p-xl rounded-md bg-secondary border border-secondary">
-                <span className="text-xs text-tertiary uppercase font-semibold tracking-wider">Total Tracked</span>
-                <div className="text-heading-sm font-bold mt-xs">24 Picks</div>
-                <div className="text-xs text-secondary mt-xxs">Across 6 tipsters</div>
-              </div>
-              <div className="p-xl rounded-md bg-secondary border border-secondary">
-                <span className="text-xs text-tertiary uppercase font-semibold tracking-wider">Win Rate (30d)</span>
-                <div className="text-heading-sm font-bold text-brand-primary mt-xs">68.4%</div>
-                <div className="text-xs text-secondary mt-xxs">13W - 6L (5 Pending)</div>
-              </div>
-              <div className="p-xl rounded-md bg-secondary border border-secondary">
-                <span className="text-xs text-tertiary uppercase font-semibold tracking-wider">Aggregated ROI</span>
-                <div className="text-heading-sm font-bold text-brand-primary mt-xs">+22.7%</div>
-                <div className="text-xs text-secondary mt-xxs">+18.4 Units net gain</div>
-              </div>
-              <div className="p-xl rounded-md bg-secondary border border-secondary">
-                <span className="text-xs text-tertiary uppercase font-semibold tracking-wider">Top Source</span>
-                <div className="text-heading-sm font-bold mt-xs">@PredictorWhale</div>
-                <div className="text-xs text-secondary mt-xxs">74% accuracy on Poly</div>
-              </div>
+              <StatCard label="Total Logged" value={`${picks.length} Picks`} hint={`Across ${stats.length} source${stats.length === 1 ? '' : 's'}`} />
+              <StatCard
+                label="Win Rate"
+                value={graded.length ? `${((won / graded.length) * 100).toFixed(1)}%` : '—'}
+                hint={graded.length ? `${won}W - ${graded.length - won}L (${pending} open)` : `${pending} open, graded after each event settles`}
+                brand
+              />
+              <StatCard label="Stored on Walrus" value={`${picks.filter((p) => p.blobId).length}`} hint="Picks with a Walrus blob" brand />
+              <StatCard label="Most Active Source" value={busiest?.source ?? '—'} hint={busiest ? `${busiest.total} picks logged` : 'Log your first pick'} />
             </div>
 
-            {/* Header + Filter controls */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-md border-b border-secondary pb-lg">
               <div>
                 <h1 className="text-heading-sm font-bold">Pick Journal Feed</h1>
-                <p className="text-sm text-secondary">Today&apos;s verified bets, predictions, and community receipts</p>
+                <p className="text-sm text-secondary">Every pick is written to Walrus Memory before the event, so nothing gets quietly deleted</p>
               </div>
-              <div className="flex items-center gap-xs">
-                <button
-                  onClick={() => setFeedFilter('all')}
-                  className={`px-md py-xs rounded-sm text-xs font-medium border ${
-                    feedFilter === 'all'
-                      ? 'bg-brand-solid text-primary-on-brand border-transparent'
-                      : 'bg-secondary text-secondary border-secondary hover:text-primary'
-                  }`}
-                >
-                  All Picks
-                </button>
-                <button
-                  onClick={() => setFeedFilter('sports')}
-                  className={`px-md py-xs rounded-sm text-xs font-medium border ${
-                    feedFilter === 'sports'
-                      ? 'bg-brand-solid text-primary-on-brand border-transparent'
-                      : 'bg-secondary text-secondary border-secondary hover:text-primary'
-                  }`}
-                >
-                  Sports
-                </button>
-                <button
-                  onClick={() => setFeedFilter('polymarket')}
-                  className={`px-md py-xs rounded-sm text-xs font-medium border ${
-                    feedFilter === 'polymarket'
-                      ? 'bg-brand-solid text-primary-on-brand border-transparent'
-                      : 'bg-secondary text-secondary border-secondary hover:text-primary'
-                  }`}
-                >
-                  Polymarket
-                </button>
-                <button
-                  onClick={() => setFeedFilter('crypto')}
-                  className={`px-md py-xs rounded-sm text-xs font-medium border ${
-                    feedFilter === 'crypto'
-                      ? 'bg-brand-solid text-primary-on-brand border-transparent'
-                      : 'bg-secondary text-secondary border-secondary hover:text-primary'
-                  }`}
-                >
-                  Macro &amp; Crypto
+              <div className="flex flex-wrap items-center gap-xs">
+                {(['all', 'Sports', 'Polymarket', 'Crypto', 'Macro'] as FeedFilter[]).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setFeedFilter(f)}
+                    className={`px-md py-xs rounded-sm text-xs font-medium border ${
+                      feedFilter === f ? 'bg-brand-solid text-primary-on-brand border-transparent' : 'bg-secondary text-secondary border-secondary hover:text-primary'
+                    }`}
+                  >
+                    {f === 'all' ? 'All Picks' : f}
+                  </button>
+                ))}
+                <button onClick={loadPicks} className="p-xs rounded-sm border border-secondary bg-secondary text-secondary hover:text-primary" title="Refresh">
+                  <RefreshCw className={`w-3.5 h-3.5 ${picksLoading ? 'animate-spin' : ''}`} />
                 </button>
               </div>
             </div>
 
-            {/* Picks List */}
+            {picksError && <ErrorBox message={picksError} />}
+            {!picksLoading && !picksError && filteredPicks.length === 0 && (
+              <div className="p-2xl rounded-md bg-secondary border border-secondary text-center space-y-sm">
+                <p className="text-sm text-secondary">No picks yet. Log one before kickoff and it becomes a permanent receipt.</p>
+                <button onClick={() => setActiveTab('log')} className="px-lg py-xs rounded-md bg-brand-solid text-primary-on-brand text-sm font-semibold">
+                  Log a pick
+                </button>
+              </div>
+            )}
+
             <div className="space-y-md">
               {filteredPicks.map((pick) => (
                 <div
@@ -388,62 +341,43 @@ export default function App() {
                   className="p-xl rounded-md bg-secondary border border-secondary hover:border-primary transition-all flex flex-col md:flex-row md:items-center justify-between gap-lg"
                 >
                   <div className="space-y-xs">
-                    <div className="flex items-center gap-sm">
-                      <span className="px-xs py-xxs rounded-sm bg-tertiary border border-secondary text-xs text-secondary font-medium">
-                        {pick.category}
-                      </span>
+                    <div className="flex flex-wrap items-center gap-sm">
+                      <span className="px-xs py-xxs rounded-sm bg-tertiary border border-secondary text-xs text-secondary font-medium">{pick.category}</span>
                       <span className="text-xs text-tertiary flex items-center gap-xxs">
                         <Clock className="w-3 h-3" />
-                        {pick.time}
+                        {timeAgo(pick.loggedAt)}
                       </span>
-                      <span className="text-xs font-medium text-brand-primary">{pick.sourceHandle}</span>
+                      <span className="text-xs font-medium text-brand-primary">{pick.source}</span>
+                      {pick.blobId ? (
+                        <ProofLink url={pick.explorerUrl} blobId={pick.blobId} />
+                      ) : (
+                        <span className="text-xs text-tertiary flex items-center gap-xxs">
+                          <Loader2 className="w-3 h-3 animate-spin" /> storing
+                        </span>
+                      )}
                     </div>
-
                     <div className="flex items-baseline gap-sm">
                       <h3 className="text-base font-bold text-primary">{pick.event}</h3>
                       <span className="text-xs text-tertiary">({pick.market})</span>
                     </div>
-
                     {pick.notes && <p className="text-xs text-secondary italic">&ldquo;{pick.notes}&rdquo;</p>}
                   </div>
 
                   <div className="flex items-center gap-xl border-t md:border-t-0 pt-md md:pt-0 border-secondary">
-                    {/* Pick & Odds */}
                     <div className="text-right min-w-[120px]">
                       <div className="text-xs text-tertiary uppercase font-medium">Selected Side</div>
                       <div className="text-sm font-bold text-primary">{pick.side}</div>
-                      <div className="text-xs text-secondary font-mono">{pick.odds}</div>
+                      <div className="text-xs text-secondary font-mono">{pick.odds || '—'}</div>
                     </div>
-
-                    {/* Confidence Gauge */}
                     <div className="min-w-[80px] text-center">
                       <div className="text-xs text-tertiary uppercase font-medium">Confidence</div>
                       <div className="text-sm font-bold text-brand-primary">{pick.confidence}%</div>
                       <div className="w-16 h-1.5 bg-tertiary rounded-full overflow-hidden mx-auto mt-xxs">
-                        <div
-                          className="h-full bg-brand-solid"
-                          style={{ width: `${pick.confidence}%` }}
-                        ></div>
+                        <div className="h-full bg-brand-solid" style={{ width: `${pick.confidence}%` }}></div>
                       </div>
                     </div>
-
-                    {/* Status Badge */}
                     <div className="min-w-[100px] flex justify-end">
-                      {pick.status === 'won' && (
-                        <span className="inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-fg-success-primary" /> Won
-                        </span>
-                      )}
-                      {pick.status === 'lost' && (
-                        <span className="inline-flex items-center gap-xs rounded-full border border-utility-error-200 bg-utility-error-50 px-md py-xxs text-xs font-medium text-utility-error-700">
-                          <XCircle className="w-3.5 h-3.5 text-fg-error-primary" /> Lost
-                        </span>
-                      )}
-                      {pick.status === 'pending' && (
-                        <span className="inline-flex items-center gap-xs rounded-full border border-secondary bg-tertiary px-md py-xxs text-xs font-medium text-secondary">
-                          <Clock className="w-3.5 h-3.5 text-fg-tertiary" /> Open
-                        </span>
-                      )}
+                      <StatusBadge status={pick.status} />
                     </div>
                   </div>
                 </div>
@@ -452,262 +386,240 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= LOG PICK FORM VIEW ================= */}
+        {/* ================= LOG PICK ================= */}
         {activeTab === 'log' && (
           <div className="max-w-2xl mx-auto space-y-xl">
             <div className="border-b border-secondary pb-md">
               <h1 className="text-heading-sm font-bold">Log New Pick (Receipt)</h1>
-              <p className="text-sm text-secondary">
-                Record an on-record pick before the event settles to hold tipsters and models accountable.
-              </p>
+              <p className="text-sm text-secondary">Record the pick before the event starts. It is stored on Walrus with a Sui-backed timestamp.</p>
             </div>
 
-            {logSuccess && (
+            <div className="p-xl rounded-md bg-secondary border border-secondary space-y-md">
+              <div className="flex items-center gap-xs text-sm font-semibold">
+                <ClipboardPaste className="w-4 h-4 text-brand-primary" /> Paste a tip
+              </div>
+              <textarea
+                rows={3}
+                placeholder="Paste a tipster's post from X, Telegram or WhatsApp, e.g. “@StatViper Celtics vs Knicks: Celtics -4.5 (-110) 3u”"
+                value={tipText}
+                onChange={(e) => setTipText(e.target.value)}
+                className={inputClass}
+              />
+              <button
+                type="button"
+                onClick={handleParseTip}
+                disabled={parsing || !tipText.trim()}
+                className="px-lg py-xs rounded-md bg-tertiary border border-secondary text-xs font-semibold text-primary hover:bg-secondary-hover disabled:opacity-50 flex items-center gap-xs"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-brand-primary" /> {parsing ? 'Reading…' : 'Fill the form from this tip'}
+              </button>
+              <p className="text-xs text-tertiary">Check the fields below before saving. Nothing is stored until you commit.</p>
+            </div>
+
+            {saveJob && (
               <div className="p-lg rounded-md bg-utility-brand-50 border border-utility-brand-200 text-utility-brand-700 text-sm font-medium flex items-center gap-sm">
-                <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-                Receipt verified and logged into your local timeline!
+                {saveJob.status === 'done' ? <CheckCircle2 className="w-5 h-5 flex-shrink-0" /> : <Loader2 className="w-5 h-5 flex-shrink-0 animate-spin" />}
+                <span>
+                  {saveJob.status === 'done' ? 'Receipt stored on Walrus. ' : `Storing on Walrus (${saveJob.status})… `}
+                  <ProofLink url={saveJob.explorerUrl} blobId={saveJob.blobId} />
+                </span>
               </div>
             )}
+            {formError && <ErrorBox message={formError} />}
 
             <form onSubmit={handleCreatePick} className="p-2xl rounded-md bg-secondary border border-secondary space-y-lg">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-lg">
                 <div className="space-y-xs">
                   <label className="text-xs font-medium text-secondary uppercase tracking-wider">Category</label>
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
-                    className="w-full px-md py-sm rounded-md bg-tertiary border border-secondary text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                  >
+                  <select value={form.category} onChange={(e) => updateForm('category', e.target.value as Category)} className={inputClass}>
                     <option value="Sports">Sports (NBA, NFL, Soccer, etc.)</option>
                     <option value="Polymarket">Polymarket / Prediction Market</option>
                     <option value="Crypto">Crypto Price Binary</option>
                     <option value="Macro">Macro / Politics</option>
                   </select>
                 </div>
-
                 <div className="space-y-xs">
                   <label className="text-xs font-medium text-secondary uppercase tracking-wider">Source Handle</label>
-                  <input
-                    type="text"
-                    placeholder="@tipster or @model"
-                    value={formSource}
-                    onChange={(e) => setFormSource(e.target.value)}
-                    className="w-full px-md py-sm rounded-md bg-tertiary border border-secondary text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                    required
-                  />
+                  <input type="text" placeholder="@tipster or @me" value={form.source} onChange={(e) => updateForm('source', e.target.value)} className={inputClass} required />
                 </div>
               </div>
 
               <div className="space-y-xs">
                 <label className="text-xs font-medium text-secondary uppercase tracking-wider">Event / Matchup</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Kansas City Chiefs vs SF 49ers or ETH > $4,000"
-                  value={formEvent}
-                  onChange={(e) => setFormEvent(e.target.value)}
-                  className="w-full px-md py-sm rounded-md bg-tertiary border border-secondary text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                  required
-                />
+                <input type="text" placeholder="e.g. Chiefs vs 49ers, or Senate control after the midterms" value={form.event} onChange={(e) => updateForm('event', e.target.value)} className={inputClass} required />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-lg">
                 <div className="space-y-xs">
                   <label className="text-xs font-medium text-secondary uppercase tracking-wider">Market Type</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Spread, Total, Binary Yes/No"
-                    value={formMarket}
-                    onChange={(e) => setFormMarket(e.target.value)}
-                    className="w-full px-md py-sm rounded-md bg-tertiary border border-secondary text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                    required
-                  />
+                  <input type="text" placeholder="Spread, Total, Moneyline, Yes/No" value={form.market} onChange={(e) => updateForm('market', e.target.value)} className={inputClass} required />
                 </div>
-
                 <div className="space-y-xs">
                   <label className="text-xs font-medium text-secondary uppercase tracking-wider">Side / Pick</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Chiefs -3.5 or YES"
-                    value={formSide}
-                    onChange={(e) => setFormSide(e.target.value)}
-                    className="w-full px-md py-sm rounded-md bg-tertiary border border-secondary text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                    required
-                  />
+                  <input type="text" placeholder="Chiefs -3.5 or YES" value={form.side} onChange={(e) => updateForm('side', e.target.value)} className={inputClass} required />
                 </div>
-
                 <div className="space-y-xs">
                   <label className="text-xs font-medium text-secondary uppercase tracking-wider">Odds / Price</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. -110 or 0.65"
-                    value={formOdds}
-                    onChange={(e) => setFormOdds(e.target.value)}
-                    className="w-full px-md py-sm rounded-md bg-tertiary border border-secondary text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                  />
+                  <input type="text" placeholder="-110, 1.91 or 0.65" value={form.odds} onChange={(e) => updateForm('odds', e.target.value)} className={inputClass} />
                 </div>
               </div>
 
               <div className="space-y-xs">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-secondary uppercase tracking-wider">Confidence Level</label>
-                  <span className="text-xs font-bold text-brand-primary">{formConfidence}%</span>
+                  <span className="text-xs font-bold text-brand-primary">{form.confidence}%</span>
                 </div>
-                <input
-                  type="range"
-                  min="50"
-                  max="100"
-                  value={formConfidence}
-                  onChange={(e) => setFormConfidence(Number(e.target.value))}
-                  className="w-full cursor-pointer"
-                />
+                <input type="range" min="50" max="100" value={form.confidence} onChange={(e) => updateForm('confidence', Number(e.target.value))} className="w-full cursor-pointer" />
               </div>
 
               <div className="space-y-xs">
                 <label className="text-xs font-medium text-secondary uppercase tracking-wider">Notes &amp; Rationale</label>
-                <textarea
-                  rows={3}
-                  placeholder="Key injury update, edge calculation, or insider thesis..."
-                  value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
-                  className="w-full px-md py-sm rounded-md bg-tertiary border border-secondary text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                ></textarea>
+                <textarea rows={3} placeholder="Injury news, line movement, the tipster's reasoning…" value={form.notes} onChange={(e) => updateForm('notes', e.target.value)} className={inputClass}></textarea>
               </div>
 
               <button
                 type="submit"
-                className="w-full py-md rounded-md bg-brand-solid hover:bg-brand-solid-hover text-primary-on-brand font-semibold text-sm transition-colors border border-transparent shadow-xs flex items-center justify-center gap-xs"
+                disabled={saving}
+                className="w-full py-md rounded-md bg-brand-solid hover:bg-brand-solid-hover disabled:bg-disabled-subtle text-primary-on-brand font-semibold text-sm transition-colors border border-transparent shadow-xs flex items-center justify-center gap-xs"
               >
-                <PlusCircle className="w-4 h-4" />
-                Commit Receipt to Journal
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusCircle className="w-4 h-4" />}
+                {saving ? 'Writing to Walrus…' : 'Commit Receipt to Walrus'}
               </button>
             </form>
           </div>
         )}
 
-        {/* ================= SOURCES LEADERBOARD VIEW ================= */}
+        {/* ================= SOURCES ================= */}
         {activeTab === 'sources' && (
           <div className="space-y-xl">
             <div className="border-b border-secondary pb-md">
-              <h1 className="text-heading-sm font-bold">Tipster &amp; Model Leaderboard</h1>
-              <p className="text-sm text-secondary">
-                Audited performance metrics, historical win rates, and return on investment
-              </p>
+              <h1 className="text-heading-sm font-bold">Source Leaderboard</h1>
+              <p className="text-sm text-secondary">Built only from receipts logged before each event. Credibility scores update as picks are graded.</p>
             </div>
-
-            <div className="rounded-md border border-secondary overflow-hidden bg-secondary">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-secondary bg-tertiary text-xs font-medium text-tertiary uppercase tracking-wider">
-                    <th className="py-md px-lg">Rank</th>
-                    <th className="py-md px-lg">Handle / Source</th>
-                    <th className="py-md px-lg">Platform</th>
-                    <th className="py-md px-lg">Win Rate</th>
-                    <th className="py-md px-lg">ROI</th>
-                    <th className="py-md px-lg">Total Logged</th>
-                    <th className="py-md px-lg">Current Streak</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-secondary text-sm">
-                  {sources.map((src) => (
-                    <tr key={src.handle} className="hover:bg-secondary-hover transition-colors">
-                      <td className="py-md px-lg font-bold">
-                        {src.rank === 1 ? (
-                          <span className="flex items-center gap-xs text-brand-primary">
-                            <Award className="w-4 h-4 text-fg-brand-primary" /> #1
-                          </span>
-                        ) : (
-                          `#${src.rank}`
-                        )}
-                      </td>
-                      <td className="py-md px-lg font-medium text-primary">
-                        <div className="flex items-center gap-xs">
-                          <span>{src.handle}</span>
-                          <ArrowUpRight className="w-3.5 h-3.5 text-fg-quaternary" />
-                        </div>
-                      </td>
-                      <td className="py-md px-lg text-secondary text-xs">{src.platform}</td>
-                      <td className="py-md px-lg">
-                        <span className="font-semibold text-brand-primary">{src.winRate}%</span>
-                      </td>
-                      <td className="py-md px-lg">
-                        <span className="font-semibold text-brand-primary">+{src.roi}%</span>
-                      </td>
-                      <td className="py-md px-lg text-secondary">{src.totalPicks} picks</td>
-                      <td className="py-md px-lg">
-                        <span className="px-xs py-xxs rounded-sm bg-tertiary border border-secondary text-xs font-mono font-medium">
-                          {src.streak}
-                        </span>
-                      </td>
+            {stats.length === 0 ? (
+              <p className="text-sm text-secondary">No sources yet. Every handle you log a pick for shows up here.</p>
+            ) : (
+              <div className="rounded-md border border-secondary overflow-x-auto bg-secondary">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-secondary bg-tertiary text-xs font-medium text-tertiary uppercase tracking-wider">
+                      <th className="py-md px-lg">Rank</th>
+                      <th className="py-md px-lg">Source</th>
+                      <th className="py-md px-lg">Markets</th>
+                      <th className="py-md px-lg">Win Rate</th>
+                      <th className="py-md px-lg">Record</th>
+                      <th className="py-md px-lg">Logged</th>
+                      <th className="py-md px-lg">Last Pick</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-secondary text-sm">
+                    {stats.map((src, i) => (
+                      <tr key={src.source} className="hover:bg-secondary-hover transition-colors">
+                        <td className="py-md px-lg font-bold">
+                          {i === 0 && src.winRate !== null ? (
+                            <span className="flex items-center gap-xs text-brand-primary">
+                              <Award className="w-4 h-4 text-fg-brand-primary" /> #1
+                            </span>
+                          ) : (
+                            `#${i + 1}`
+                          )}
+                        </td>
+                        <td className="py-md px-lg font-medium text-primary">{src.source}</td>
+                        <td className="py-md px-lg text-secondary text-xs">{src.categories.join(', ')}</td>
+                        <td className="py-md px-lg font-semibold text-brand-primary">{src.winRate === null ? '—' : `${src.winRate.toFixed(1)}%`}</td>
+                        <td className="py-md px-lg font-mono text-xs">
+                          {src.won}W-{src.lost}L <span className="text-tertiary">({src.pending} open)</span>
+                        </td>
+                        <td className="py-md px-lg text-secondary">{src.total} picks</td>
+                        <td className="py-md px-lg text-secondary text-xs">{timeAgo(src.lastPickAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
-        {/* ================= MEMORY NOTES VIEW ================= */}
+        {/* ================= MEMORY INSPECTOR ================= */}
         {activeTab === 'memory' && (
           <div className="space-y-xl">
-            <div className="border-b border-secondary pb-md flex items-center justify-between">
+            <div className="border-b border-secondary pb-md flex items-center justify-between gap-md">
               <div>
-                <h1 className="text-heading-sm font-bold">Memory &amp; Playbook</h1>
-                <p className="text-sm text-secondary">
-                  System insights, market anomalies, and betting rules learned from previous outcomes
-                </p>
+                <h1 className="text-heading-sm font-bold">Memory Inspector</h1>
+                <p className="text-sm text-secondary">Every memory Receipts has written to Walrus, with a link to its blob</p>
               </div>
-              <button className="px-lg py-xs rounded-md bg-secondary border border-secondary text-xs font-semibold text-primary hover:bg-tertiary transition-colors flex items-center gap-xs">
-                <Sparkles className="w-3.5 h-3.5 text-brand-primary" />
-                Add Insight
+              <button
+                onClick={loadMemories}
+                className="px-lg py-xs rounded-md bg-secondary border border-secondary text-xs font-semibold text-primary hover:bg-tertiary transition-colors flex items-center gap-xs"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-brand-primary ${memoriesLoading ? 'animate-spin' : ''}`} /> Refresh
               </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-lg">
-              {memories.map((mem) => (
-                <div
-                  key={mem.id}
-                  className="p-xl rounded-md bg-secondary border border-secondary flex flex-col justify-between hover:border-primary transition-all"
-                >
-                  <div className="space-y-sm">
-                    <div className="flex items-center justify-between text-xs text-tertiary">
-                      <span>{mem.date}</span>
-                      <Brain className="w-3.5 h-3.5 text-brand-primary" />
-                    </div>
-                    <h3 className="text-base font-bold text-primary">{mem.title}</h3>
-                    <p className="text-sm text-secondary leading-relaxed">{mem.insight}</p>
-                  </div>
-
-                  <div className="mt-xl flex flex-wrap gap-xs">
-                    {mem.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="px-xs py-xxs rounded-sm bg-tertiary border border-secondary text-xs text-tertiary"
-                      >
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
+              <StatCard label="Network" value={networkLabel} hint={network === 'mainnet' ? 'Counts toward the submission' : 'Switch to mainnet before submitting'} />
+              <StatCard label="Memories Stored" value={`${memories.length}`} hint="Across picks, credibility and profile" brand />
+              <div className="p-xl rounded-md bg-secondary border border-secondary">
+                <span className="text-xs text-tertiary uppercase font-semibold tracking-wider">Mainnet Requirement</span>
+                <div className="text-heading-sm font-bold mt-xs">
+                  {network === 'mainnet' ? Math.min(memories.length, MAINNET_MEMORY_GOAL) : 0} / {MAINNET_MEMORY_GOAL}
                 </div>
-              ))}
+                <div className="w-full h-1.5 bg-tertiary rounded-full overflow-hidden mt-sm">
+                  <div
+                    className="h-full bg-brand-solid"
+                    style={{ width: `${network === 'mainnet' ? Math.min(100, (memories.length / MAINNET_MEMORY_GOAL) * 100) : 0}%` }}
+                  ></div>
+                </div>
+              </div>
             </div>
+
+            {memoriesError && <ErrorBox message={memoriesError} />}
+            {!memoriesLoading && !memoriesError && memories.length === 0 && <p className="text-sm text-secondary">No memories yet. Log a pick to write the first one.</p>}
+            {memories.length > 0 && (
+              <div className="rounded-md border border-secondary overflow-x-auto bg-secondary">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-secondary bg-tertiary text-xs font-medium text-tertiary uppercase tracking-wider">
+                      <th className="py-md px-lg">Namespace</th>
+                      <th className="py-md px-lg">Walrus Blob</th>
+                      <th className="py-md px-lg">Written</th>
+                      <th className="py-md px-lg">Size</th>
+                      <th className="py-md px-lg">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-secondary text-sm">
+                    {memories.map((m) => (
+                      <tr key={m.memoryId} className="hover:bg-secondary-hover transition-colors">
+                        <td className="py-md px-lg">
+                          <span className="px-xs py-xxs rounded-sm bg-tertiary border border-secondary text-xs font-mono">{m.namespace.replace('receipts-', '')}</span>
+                        </td>
+                        <td className="py-md px-lg">
+                          <ProofLink url={m.explorerUrl} blobId={m.blobId} />
+                        </td>
+                        <td className="py-md px-lg text-secondary text-xs">{m.createdAt ? new Date(m.createdAt).toLocaleString() : '—'}</td>
+                        <td className="py-md px-lg text-secondary text-xs">{m.size ? `${(m.size / 1024).toFixed(1)} KB` : '—'}</td>
+                        <td className="py-md px-lg text-secondary text-xs">{m.status ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
-        {/* ================= SUI WALLET VIEW ================= */}
+        {/* ================= SUI WALLET ================= */}
         {activeTab === 'wallet' && (
           <div className="max-w-3xl mx-auto space-y-xl">
             <div className="border-b border-secondary pb-md">
               <h1 className="text-heading-sm font-bold">Sui Wallet Reader</h1>
-              <p className="text-sm text-secondary">
-                Read real-time SUI and USDC balances on Sui Mainnet powered by Tatum RPC Gateway
-              </p>
+              <p className="text-sm text-secondary">Read real-time SUI and USDC balances on Sui Mainnet powered by Tatum RPC Gateway</p>
             </div>
 
             <div className="p-2xl rounded-md bg-secondary border border-secondary space-y-xl">
               <div className="space-y-xs">
-                <label className="text-xs font-medium text-secondary uppercase tracking-wider">
-                  Sui Wallet Address
-                </label>
+                <label className="text-xs font-medium text-secondary uppercase tracking-wider">Sui Wallet Address</label>
                 <div className="flex gap-sm">
                   <input
                     type="text"
@@ -726,44 +638,27 @@ export default function App() {
                 </div>
               </div>
 
-              {walletError && (
-                <div className="p-md rounded-md bg-utility-error-50 border border-utility-error-200 text-utility-error-700 text-xs">
-                  {walletError}
-                </div>
-              )}
+              {walletError && <ErrorBox message={walletError} />}
 
-              {/* Balance Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-lg pt-md">
-                {/* SUI Card */}
                 <div className="p-xl rounded-md bg-tertiary border border-secondary">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-tertiary uppercase font-medium">Native Asset</span>
-                    <span className="px-xs py-xxs rounded-sm bg-secondary text-xs font-mono text-secondary">
-                      0x2::sui::SUI
-                    </span>
+                    <span className="px-xs py-xxs rounded-sm bg-secondary text-xs font-mono text-secondary">0x2::sui::SUI</span>
                   </div>
-                  <div className="text-heading-md font-bold mt-sm text-primary">
-                    {suiBalance !== null ? `${suiBalance} SUI` : '—'}
-                  </div>
-                  <p className="text-xs text-secondary mt-xxs">Gas &amp; staking currency on Sui Mainnet</p>
+                  <div className="text-heading-md font-bold mt-sm text-primary">{suiBalance !== null ? `${suiBalance} SUI` : '—'}</div>
+                  <p className="text-xs text-secondary mt-xxs">Gas currency on Sui Mainnet</p>
                 </div>
-
-                {/* USDC Card */}
                 <div className="p-xl rounded-md bg-tertiary border border-secondary">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-tertiary uppercase font-medium">Stablecoin</span>
-                    <span className="px-xs py-xxs rounded-sm bg-secondary text-xs font-mono text-secondary">
-                      USDC (Native)
-                    </span>
+                    <span className="px-xs py-xxs rounded-sm bg-secondary text-xs font-mono text-secondary">USDC (Native)</span>
                   </div>
-                  <div className="text-heading-md font-bold mt-sm text-primary">
-                    {usdcBalance !== null ? `${usdcBalance} USDC` : '—'}
-                  </div>
-                  <p className="text-xs text-secondary mt-xxs">Polymarket &amp; market settlement currency</p>
+                  <div className="text-heading-md font-bold mt-sm text-primary">{usdcBalance !== null ? `${usdcBalance} USDC` : '—'}</div>
+                  <p className="text-xs text-secondary mt-xxs">Pays for pay-per-pick unlocks</p>
                 </div>
               </div>
 
-              {/* RPC info box */}
               <div className="p-lg rounded-md bg-tertiary border border-secondary flex items-start gap-md">
                 <Wallet className="w-5 h-5 text-brand-primary flex-shrink-0 mt-xxs" />
                 <div className="text-xs space-y-xxs text-secondary">
