@@ -313,9 +313,11 @@ export default function App() {
     try {
       const res = await api.gradePick(pick.id, result);
       setLearned([res.credibility, ...res.patterns]);
-      // The relayer indexes the new memories in the background; give it a moment
-      // before re-reading so the feed shows the updated trust.
-      await new Promise((r) => setTimeout(r, 4000));
+      // Show the new grade and score straight away; recall from Walrus lags the write.
+      setPicks((prev) => prev.map((p) => (p.source === pick.source && p.league === pick.league ? { ...p, trust: res.trust } : p)).map((p) => (p.id === pick.id ? { ...p, status: result } : p)));
+      // Re-read once the grade is stored on Walrus, so the feed comes from memory again.
+      await waitForJob(res.jobId, () => {});
+      await new Promise((r) => setTimeout(r, 3000));
       await loadPicks();
     } catch (err: any) {
       setPicksError(err.message);
