@@ -72,8 +72,8 @@ export function searchText(input) {
   return { text: words.replace(/[^\p{L}\p{N}' ]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 60), slug: slug?.toLowerCase() ?? null }
 }
 
-// Tatum requires `platform` on /events (it answers 400 without it), and the
-// params below are the exact set the live probe got a 200 for.
+// Tatum answered 400 to /events without `platform`; these params are the set
+// the live probe got a 200 for.
 // Active markets matching a search, flattened out of their events, busiest
 // first. For a pasted link, markets from that exact event come first.
 export async function searchMarkets(input) {
