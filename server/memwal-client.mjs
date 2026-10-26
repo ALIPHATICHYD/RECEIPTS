@@ -11,6 +11,7 @@ import { MemWal, MemWalMock } from '@mysten-incubation/memwal'
 
 export const NAMESPACES = {
   picks: 'receipts-picks',
+  grades: 'receipts-grades',
   credibility: 'receipts-credibility',
   profile: 'receipts-profile',
 }

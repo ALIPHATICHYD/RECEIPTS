@@ -1,6 +1,17 @@
 import { Router } from 'express'
 import { memwal, memwalNetwork, blobExplorerUrl, NAMESPACES, MissingMemWalConfigError } from '../memwal-client.mjs'
-import { validatePickInput, encodePick, decodePick, parseTip } from '../picks.mjs'
+import { validatePickInput, encodePick, encodeGrade, parseTip, RESULTS } from '../picks.mjs'
+import {
+  loadPicks,
+  loadCredibility,
+  loadProfile,
+  writeCredibility,
+  writePatternChanges,
+  writeLimit,
+  adviseOpenPicks,
+  credKey,
+  findPatterns,
+} from '../learning.mjs'
 
 const router = Router()
 
@@ -43,27 +54,82 @@ router.get('/picks/jobs/:jobId', async (req, res) => {
   }
 })
 
+// The feed: every pick with its latest grade, and for open picks the advice and
+// trust score recalled from memory. Open picks are ranked by remembered trust.
 router.get('/picks', async (_req, res) => {
   try {
-    const result = await memwal().recall({
-      query: 'Receipt: tipster picked a side, logged pick',
-      namespace: NAMESPACES.picks,
-      limit: 100,
-      sort: 'recent',
-    })
-    // Newest record per pick id wins, so a later grade supersedes the original.
-    const byId = new Map()
-    for (const hit of result.results) {
-      const pick = decodePick(hit.text)
-      if (!pick) continue
-      const record = { ...pick, blobId: hit.blob_id, storedAt: hit.created_at ?? pick.loggedAt, explorerUrl: blobExplorerUrl(hit.blob_id) }
-      const prev = byId.get(pick.id)
-      if (!prev || record.storedAt > prev.storedAt) byId.set(pick.id, record)
-    }
-    const picks = [...byId.values()].sort((a, b) => b.loggedAt.localeCompare(a.loggedAt))
-    res.json({ network: memwalNetwork(), picks })
+    const [picks, credibility, profile] = await Promise.all([loadPicks(), loadCredibility(), loadProfile()])
+    const advice = new Map(adviseOpenPicks(picks, credibility, profile).map((a) => [a.pickId, a]))
+    const enriched = picks.map((p) => ({ ...p, trust: advice.get(p.id)?.trust ?? null, advice: advice.get(p.id)?.advice ?? [] }))
+    const open = enriched.filter((p) => p.status === 'pending').sort((a, b) => (b.trust ?? 50) - (a.trust ?? 50) || b.loggedAt.localeCompare(a.loggedAt))
+    const settled = enriched.filter((p) => p.status !== 'pending').sort((a, b) => b.grade.gradedAt.localeCompare(a.grade.gradedAt))
+    res.json({ network: memwalNetwork(), picks: [...open, ...settled] })
   } catch (err) {
     sendError(res, err, 'Failed to recall picks from Walrus Memory')
+  }
+})
+
+// Grade a pick. Writes a grade memory, then the source's new credibility score,
+// then any pattern in the user's journal whose verdict changed.
+router.post('/picks/:id/grade', async (req, res) => {
+  const result = req.body?.result
+  if (!RESULTS.includes(result)) return res.status(400).json({ error: `result must be one of ${RESULTS.join(', ')}` })
+  const closingOdds = typeof req.body?.closingOdds === 'string' ? req.body.closingOdds.trim().slice(0, 20) : ''
+  try {
+    const [picks, credibility, profile] = await Promise.all([loadPicks(), loadCredibility(), loadProfile()])
+    const pick = picks.find((p) => p.id === req.params.id)
+    if (!pick) return res.status(404).json({ error: 'Pick not found in memory' })
+
+    const grade = { pickId: pick.id, result, closingOdds: closingOdds || null, gradedAt: new Date().toISOString() }
+    const accepted = await memwal().remember(encodeGrade(pick, grade), NAMESPACES.grades)
+
+    // Score from the picks we already hold plus this grade, so we don't wait on the write.
+    pick.status = result
+    pick.grade = grade
+    const previous = credibility.current.get(credKey(pick.source, pick.league))
+    const cred = await writeCredibility(picks, pick, previous)
+    const patterns = await writePatternChanges(picks, profile)
+    res.status(202).json({ jobId: accepted.job_id, credibility: cred.sentence, trust: cred.record.trust, prevTrust: cred.record.prevTrust, patterns })
+  } catch (err) {
+    sendError(res, err, 'Failed to grade pick')
+  }
+})
+
+// Leaderboard plus the timeline of every score change, newest first.
+router.get('/credibility', async (_req, res) => {
+  try {
+    const { current, history } = await loadCredibility()
+    const board = [...current.values()].sort((a, b) => b.trust - a.trust || b.n - a.n)
+    res.json({ network: memwalNetwork(), board, history })
+  } catch (err) {
+    sendError(res, err, 'Failed to recall credibility')
+  }
+})
+
+router.get('/profile', async (_req, res) => {
+  try {
+    const [profile, picks] = await Promise.all([loadProfile(), loadPicks()])
+    res.json({
+      patterns: [...profile.patterns.values()].filter((p) => p.verdict !== 'neutral'),
+      limit: profile.limit,
+      history: profile.history,
+      // Live segments, including ones not yet strong enough to be remembered.
+      segments: findPatterns(picks),
+    })
+  } catch (err) {
+    sendError(res, err, 'Failed to recall profile')
+  }
+})
+
+router.post('/profile/limit', async (req, res) => {
+  const n = Number(req.body?.maxDailyLosses)
+  if (!Number.isInteger(n) || n < 0 || n > 20) return res.status(400).json({ error: 'maxDailyLosses must be a whole number from 0 to 20' })
+  try {
+    const profile = await loadProfile()
+    const written = await writeLimit(n || null, profile.limit)
+    res.status(202).json({ jobId: written.jobId, limit: written.record, sentence: written.sentence })
+  } catch (err) {
+    sendError(res, err, 'Failed to save limit')
   }
 })
 

@@ -5,8 +5,41 @@
 import { randomUUID } from 'crypto'
 
 const MARKER = 'RECEIPTS_PICK_V1 '
+const GRADE_MARKER = 'RECEIPTS_GRADE_V1 '
 
 export const CATEGORIES = ['Sports', 'Polymarket', 'Crypto', 'Macro']
+export const RESULTS = ['won', 'lost', 'push']
+
+// Credibility is tracked per source and league, because a sharp NBA voice can be
+// useless on the Premier League. Picks without a known league fall back to category.
+const LEAGUES = [
+  ['NBA', /\bnba\b|celtics|knicks|lakers|warriors|nuggets|bucks|heat|76ers|sixers|suns|mavericks|thunder|cavaliers|timberwolves|clippers|grizzlies|pelicans|kings|rockets|spurs|hawks|bulls|pacers|magic|nets|raptors|pistons|hornets|wizards|blazers|jazz/i],
+  ['NFL', /\bnfl\b|chiefs|49ers|eagles|cowboys|bills|ravens|bengals|packers|lions|steelers|dolphins|jets|patriots|broncos|chargers|raiders|seahawks|rams|vikings|bears|saints|buccaneers|falcons|panthers|giants|commanders|texans|colts|jaguars|titans|browns|cardinals/i],
+  ['UCL', /champions league|\bucl\b/i],
+  ['EPL', /premier league|\bepl\b|arsenal|chelsea|liverpool|man(chester)? (city|united|utd)|tottenham|spurs fc|newcastle|aston villa|everton|west ham|brighton|fulham|brentford|crystal palace|wolves|bournemouth|nottingham forest|leeds|sunderland|burnley/i],
+  ['La Liga', /la liga|real madrid|barcelona|atletico|sevilla|villarreal|real sociedad|athletic bilbao|valencia|betis/i],
+  ['NHL', /\bnhl\b/i],
+  ['MLB', /\bmlb\b|world series/i],
+  ['Elections', /elect|senate|house|midterm|governor|congress/i],
+]
+
+export function detectLeague(text, category) {
+  const hit = LEAGUES.find(([, re]) => re.test(text || ''))
+  return hit ? hit[0] : category || 'Sports'
+}
+
+// Decimal odds from American (-110), decimal (1.91) or prediction-market price (0.65).
+export function decimalOdds(odds) {
+  const s = String(odds ?? '').trim()
+  if (/^[+-]\d{3,4}$/.test(s)) {
+    const n = Number(s)
+    return n > 0 ? 1 + n / 100 : 1 + 100 / -n
+  }
+  const n = Number(s)
+  if (n > 0 && n < 1) return 1 / n
+  if (n >= 1.01 && n < 100) return n
+  return 2 // unknown odds: treat as even money so units stay comparable
+}
 
 function clean(value, max = 200) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
@@ -29,9 +62,11 @@ export function validatePickInput(body) {
     confidence: Math.min(100, Math.max(0, Math.round(Number(body?.confidence) || 0))),
     notes: clean(body?.notes, 500),
     eventTime: clean(body?.eventTime, 40) || null,
+    league: clean(body?.league, 40),
     loggedAt: new Date().toISOString(),
     status: 'pending',
   }
+  if (!pick.league) pick.league = detectLeague(`${pick.event} ${pick.notes}`, pick.category)
   const missing = ['event', 'market', 'side'].filter((k) => !pick[k])
   return missing.length ? { error: `Missing ${missing.join(', ')}` } : { pick }
 }
@@ -49,6 +84,26 @@ export function decodePick(text) {
   if (!line) return null
   try {
     return JSON.parse(line.slice(MARKER.length))
+  } catch {
+    return null
+  }
+}
+
+// A grade is its own memory. The pick record is never rewritten; the newest grade
+// for a pick id decides its status.
+export function encodeGrade(pick, grade) {
+  const verb = grade.result === 'push' ? 'pushed' : grade.result
+  const sentence =
+    `Graded: ${pick.source}'s pick ${pick.side} (${pick.market}) for ${pick.event} [${pick.league}] ${verb}` +
+    `${grade.closingOdds ? `, closing odds ${grade.closingOdds}` : ''}, graded ${grade.gradedAt}.`
+  return `${sentence}\n${GRADE_MARKER}${JSON.stringify(grade)}`
+}
+
+export function decodeGrade(text) {
+  const line = text?.split('\n').find((l) => l.startsWith(GRADE_MARKER))
+  if (!line) return null
+  try {
+    return JSON.parse(line.slice(GRADE_MARKER.length))
   } catch {
     return null
   }
@@ -80,6 +135,7 @@ export function parseTip(raw, fallbackSource) {
     category: 'Sports',
     confidence: 60,
     notes: text.slice(0, 280),
+    league: '',
   }
 
   const lower = text.toLowerCase()
@@ -123,5 +179,6 @@ export function parseTip(raw, fallbackSource) {
   else if (conf?.[2]) draft.confidence = Math.min(95, 50 + Number(conf[2]) * 10)
 
   if (!draft.event && draft.category !== 'Sports') draft.event = text.split('\n')[0].slice(0, 120)
+  draft.league = detectLeague(text, draft.category)
   return draft
 }

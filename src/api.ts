@@ -12,11 +12,62 @@ export interface PickRecord {
   confidence: number;
   notes: string;
   eventTime: string | null;
+  league?: string;
   loggedAt: string;
   status: PickStatus;
   blobId?: string;
   storedAt?: string;
   explorerUrl?: string | null;
+  grade?: { result: PickStatus; closingOdds: string | null; gradedAt: string; blobId?: string; explorerUrl?: string | null } | null;
+  trust?: number | null;
+  advice?: Advice[];
+}
+
+export interface MemoryRef {
+  blobId: string;
+  explorerUrl: string | null;
+}
+
+export interface Advice {
+  tone: 'good' | 'warn' | 'info';
+  text: string;
+  memory?: MemoryRef;
+}
+
+export interface CredibilityRecord extends MemoryRef {
+  key: string;
+  source: string;
+  league: string;
+  n: number;
+  won: number;
+  lost: number;
+  push: number;
+  trust: number;
+  prevTrust: number;
+  roi: number;
+  clv: number | null;
+  reason: string;
+  recordedAt: string;
+  text: string;
+}
+
+export interface PatternRecord extends MemoryRef {
+  key: string;
+  label: string;
+  n: number;
+  won: number;
+  lost: number;
+  roi: number;
+  verdict: 'leak' | 'edge' | 'neutral';
+  recordedAt: string;
+  text: string;
+}
+
+export interface ProfileData {
+  patterns: PatternRecord[];
+  limit: (MemoryRef & { maxDailyLosses: number | null; recordedAt: string }) | null;
+  history: (MemoryRef & { type: string; recordedAt: string; text: string })[];
+  segments: { key: string; label: string; n: number; won: number; lost: number; roi: number; verdict: string }[];
 }
 
 export type PickInput = Pick<PickRecord, 'event' | 'market' | 'side' | 'odds' | 'source' | 'category' | 'confidence' | 'notes'>;
@@ -56,6 +107,15 @@ export const api = {
   jobStatus: (jobId: string) => call<JobStatus>(`/api/picks/jobs/${encodeURIComponent(jobId)}`),
   parseTip: (text: string, source?: string) =>
     call<{ draft: PickInput }>('/api/picks/parse', { method: 'POST', body: JSON.stringify({ text, source }) }),
+  gradePick: (id: string, result: 'won' | 'lost' | 'push', closingOdds?: string) =>
+    call<{ jobId: string; credibility: string; trust: number; prevTrust: number; patterns: string[] }>(
+      `/api/picks/${encodeURIComponent(id)}/grade`,
+      { method: 'POST', body: JSON.stringify({ result, closingOdds }) },
+    ),
+  credibility: () => call<{ network: string; board: CredibilityRecord[]; history: CredibilityRecord[] }>('/api/credibility'),
+  profile: () => call<ProfileData>('/api/profile'),
+  setLimit: (maxDailyLosses: number) =>
+    call<{ jobId: string; sentence: string }>('/api/profile/limit', { method: 'POST', body: JSON.stringify({ maxDailyLosses }) }),
   listMemories: () => call<{ network: string; total: number; memories: MemoryRow[] }>('/api/memories'),
   suiBalance: (address: string) =>
     call<{ sui: string; usdc: string }>(`/api/sui/balance?address=${encodeURIComponent(address)}`),
@@ -118,4 +178,8 @@ export function timeAgo(iso: string | null | undefined): string {
 export function shortId(id: string | null | undefined): string {
   if (!id) return '—';
   return id.length > 14 ? `${id.slice(0, 6)}…${id.slice(-6)}` : id;
+}
+
+export function pct(x: number): string {
+  return `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`;
 }

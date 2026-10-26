@@ -28,6 +28,10 @@ import {
   type PickInput,
   type MemoryRow,
   type JobStatus,
+  type Advice,
+  type CredibilityRecord,
+  type ProfileData,
+  pct,
 } from './api';
 
 type Tab = 'feed' | 'log' | 'sources' | 'memory' | 'wallet';
@@ -114,6 +118,54 @@ function ErrorBox({ message }: { message: string }) {
   );
 }
 
+const ADVICE_STYLES: Record<Advice['tone'], string> = {
+  good: 'border-utility-success-200 bg-utility-success-50 text-utility-success-700',
+  warn: 'border-utility-error-200 bg-utility-error-50 text-utility-error-700',
+  info: 'border-secondary bg-tertiary text-secondary',
+};
+
+function AdviceList({ advice }: { advice: Advice[] }) {
+  return (
+    <ul className="space-y-xxs pt-xs">
+      {advice.map((a, i) => (
+        <li key={i} className={`text-xs px-sm py-xxs rounded-sm border flex flex-wrap items-center gap-xs ${ADVICE_STYLES[a.tone]}`}>
+          <Brain className="w-3 h-3 flex-shrink-0" />
+          <span>{a.text}</span>
+          {a.memory && (
+            <span className="opacity-80">
+              from memory <ProofLink url={a.memory.explorerUrl} blobId={a.memory.blobId} />
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function GradeButtons({ busy, onGrade }: { busy: boolean; onGrade: (r: 'won' | 'lost' | 'push') => void }) {
+  if (busy) {
+    return (
+      <span className="text-xs text-tertiary flex items-center gap-xxs">
+        <Loader2 className="w-3 h-3 animate-spin" /> grading
+      </span>
+    );
+  }
+  const btn = 'px-sm py-xxs rounded-sm border text-xs font-medium';
+  return (
+    <div className="flex gap-xxs" aria-label="Grade this pick">
+      <button onClick={() => onGrade('won')} className={`${btn} border-utility-success-200 bg-utility-success-50 text-utility-success-700`}>Won</button>
+      <button onClick={() => onGrade('lost')} className={`${btn} border-utility-error-200 bg-utility-error-50 text-utility-error-700`}>Lost</button>
+      <button onClick={() => onGrade('push')} className={`${btn} border-secondary bg-tertiary text-secondary`}>Push</button>
+    </div>
+  );
+}
+
+function TrustDelta({ from, to }: { from: number; to: number }) {
+  if (from === to) return <span className="text-xs text-tertiary">=</span>;
+  const up = to > from;
+  return <span className={`text-xs font-semibold ${up ? 'text-utility-success-700' : 'text-utility-error-700'}`}>{up ? '▲' : '▼'} {Math.abs(to - from)}</span>;
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('feed');
   const [network, setNetwork] = useState<string>('…');
@@ -130,6 +182,14 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [saveJob, setSaveJob] = useState<JobStatus | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const [gradingId, setGradingId] = useState<string | null>(null);
+  const [learned, setLearned] = useState<string[] | null>(null);
+  const [credBoard, setCredBoard] = useState<CredibilityRecord[]>([]);
+  const [credHistory, setCredHistory] = useState<CredibilityRecord[]>([]);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [limitInput, setLimitInput] = useState('3');
+  const [learningError, setLearningError] = useState<string | null>(null);
 
   const [memories, setMemories] = useState<MemoryRow[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
@@ -179,6 +239,51 @@ export default function App() {
       .catch((err) => setMemoryError(err.message));
     loadPicks();
   }, [loadPicks]);
+
+  const loadLearning = useCallback(async () => {
+    setLearningError(null);
+    try {
+      const [cred, prof] = await Promise.all([api.credibility(), api.profile()]);
+      setCredBoard(cred.board);
+      setCredHistory(cred.history);
+      setProfile(prof);
+    } catch (err: any) {
+      setLearningError(err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'sources' || activeTab === 'memory') loadLearning();
+  }, [activeTab, loadLearning]);
+
+  const handleGrade = async (pick: PickRecord, result: 'won' | 'lost' | 'push') => {
+    setGradingId(pick.id);
+    setPicksError(null);
+    try {
+      const res = await api.gradePick(pick.id, result);
+      setLearned([res.credibility, ...res.patterns]);
+      // The relayer indexes the new memories in the background; give it a moment
+      // before re-reading so the feed shows the updated trust.
+      await new Promise((r) => setTimeout(r, 4000));
+      await loadPicks();
+    } catch (err: any) {
+      setPicksError(err.message);
+    } finally {
+      setGradingId(null);
+    }
+  };
+
+  const handleSetLimit = async () => {
+    const n = Number(limitInput);
+    if (!Number.isInteger(n) || n < 0) return;
+    try {
+      const res = await api.setLimit(n);
+      setLearned([res.sentence]);
+      setTimeout(loadLearning, 4000);
+    } catch (err: any) {
+      setLearningError(err.message);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === 'memory') loadMemories();
@@ -285,6 +390,17 @@ export default function App() {
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-xl py-2xl space-y-xl">
         {memoryError && <ErrorBox message={`Walrus Memory: ${memoryError}`} />}
+        {learned && (
+              <div className="p-lg rounded-md bg-utility-brand-50 border border-utility-brand-200 text-utility-brand-700 text-sm space-y-xxs">
+                <div className="font-semibold flex items-center gap-xs">
+                  <Sparkles className="w-4 h-4" /> Receipts learned something and wrote it to Walrus
+                </div>
+                {learned.map((l, i) => (
+                  <p key={i} className="text-xs">{l}</p>
+                ))}
+                <button onClick={() => setLearned(null)} className="text-xs underline">Dismiss</button>
+              </div>
+            )}
 
         {/* ================= FEED ================= */}
         {activeTab === 'feed' && (
@@ -342,7 +458,7 @@ export default function App() {
                 >
                   <div className="space-y-xs">
                     <div className="flex flex-wrap items-center gap-sm">
-                      <span className="px-xs py-xxs rounded-sm bg-tertiary border border-secondary text-xs text-secondary font-medium">{pick.category}</span>
+                      <span className="px-xs py-xxs rounded-sm bg-tertiary border border-secondary text-xs text-secondary font-medium">{pick.league ?? pick.category}</span>
                       <span className="text-xs text-tertiary flex items-center gap-xxs">
                         <Clock className="w-3 h-3" />
                         {timeAgo(pick.loggedAt)}
@@ -361,6 +477,7 @@ export default function App() {
                       <span className="text-xs text-tertiary">({pick.market})</span>
                     </div>
                     {pick.notes && <p className="text-xs text-secondary italic">&ldquo;{pick.notes}&rdquo;</p>}
+                    {pick.status === 'pending' && pick.advice && pick.advice.length > 0 && <AdviceList advice={pick.advice} />}
                   </div>
 
                   <div className="flex items-center gap-xl border-t md:border-t-0 pt-md md:pt-0 border-secondary">
@@ -370,14 +487,18 @@ export default function App() {
                       <div className="text-xs text-secondary font-mono">{pick.odds || '—'}</div>
                     </div>
                     <div className="min-w-[80px] text-center">
-                      <div className="text-xs text-tertiary uppercase font-medium">Confidence</div>
-                      <div className="text-sm font-bold text-brand-primary">{pick.confidence}%</div>
+                      <div className="text-xs text-tertiary uppercase font-medium">Source Trust</div>
+                      <div className="text-sm font-bold text-brand-primary">{pick.trust ?? '—'}</div>
                       <div className="w-16 h-1.5 bg-tertiary rounded-full overflow-hidden mx-auto mt-xxs">
-                        <div className="h-full bg-brand-solid" style={{ width: `${pick.confidence}%` }}></div>
+                        <div className="h-full bg-brand-solid" style={{ width: `${pick.trust ?? 0}%` }}></div>
                       </div>
                     </div>
-                    <div className="min-w-[100px] flex justify-end">
+                    <div className="min-w-[120px] flex flex-col items-end gap-xs">
                       <StatusBadge status={pick.status} />
+                      {pick.status === 'pending' && pick.blobId && (
+                        <GradeButtons busy={gradingId === pick.id} onGrade={(result) => handleGrade(pick, result)} />
+                      )}
+                      {pick.grade?.blobId && <ProofLink url={pick.grade.explorerUrl} blobId={pick.grade.blobId} />}
                     </div>
                   </div>
                 </div>
@@ -493,11 +614,15 @@ export default function App() {
         {activeTab === 'sources' && (
           <div className="space-y-xl">
             <div className="border-b border-secondary pb-md">
-              <h1 className="text-heading-sm font-bold">Source Leaderboard</h1>
-              <p className="text-sm text-secondary">Built only from receipts logged before each event. Credibility scores update as picks are graded.</p>
+              <h1 className="text-heading-sm font-bold">Source Credibility</h1>
+              <p className="text-sm text-secondary">
+                Trust is scored per source and league from graded receipts, and every change is written to Walrus as a new memory.
+              </p>
             </div>
-            {stats.length === 0 ? (
-              <p className="text-sm text-secondary">No sources yet. Every handle you log a pick for shows up here.</p>
+            {learningError && <ErrorBox message={learningError} />}
+
+            {credBoard.length === 0 ? (
+              <p className="text-sm text-secondary">No graded picks yet. Grade an open pick in the feed and its source gets a score here.</p>
             ) : (
               <div className="rounded-md border border-secondary overflow-x-auto bg-secondary">
                 <table className="w-full text-left border-collapse">
@@ -505,18 +630,19 @@ export default function App() {
                     <tr className="border-b border-secondary bg-tertiary text-xs font-medium text-tertiary uppercase tracking-wider">
                       <th className="py-md px-lg">Rank</th>
                       <th className="py-md px-lg">Source</th>
-                      <th className="py-md px-lg">Markets</th>
-                      <th className="py-md px-lg">Win Rate</th>
+                      <th className="py-md px-lg">League</th>
+                      <th className="py-md px-lg">Trust</th>
                       <th className="py-md px-lg">Record</th>
-                      <th className="py-md px-lg">Logged</th>
-                      <th className="py-md px-lg">Last Pick</th>
+                      <th className="py-md px-lg">ROI</th>
+                      <th className="py-md px-lg">Last change</th>
+                      <th className="py-md px-lg">Memory</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-secondary text-sm">
-                    {stats.map((src, i) => (
-                      <tr key={src.source} className="hover:bg-secondary-hover transition-colors">
+                    {credBoard.map((c, i) => (
+                      <tr key={c.key} className="hover:bg-secondary-hover transition-colors">
                         <td className="py-md px-lg font-bold">
-                          {i === 0 && src.winRate !== null ? (
+                          {i === 0 ? (
                             <span className="flex items-center gap-xs text-brand-primary">
                               <Award className="w-4 h-4 text-fg-brand-primary" /> #1
                             </span>
@@ -524,18 +650,56 @@ export default function App() {
                             `#${i + 1}`
                           )}
                         </td>
-                        <td className="py-md px-lg font-medium text-primary">{src.source}</td>
-                        <td className="py-md px-lg text-secondary text-xs">{src.categories.join(', ')}</td>
-                        <td className="py-md px-lg font-semibold text-brand-primary">{src.winRate === null ? '—' : `${src.winRate.toFixed(1)}%`}</td>
-                        <td className="py-md px-lg font-mono text-xs">
-                          {src.won}W-{src.lost}L <span className="text-tertiary">({src.pending} open)</span>
+                        <td className="py-md px-lg font-medium text-primary">{c.source}</td>
+                        <td className="py-md px-lg text-secondary text-xs">{c.league}</td>
+                        <td className="py-md px-lg">
+                          <span className="font-semibold text-brand-primary">{c.trust}</span> <TrustDelta from={c.prevTrust} to={c.trust} />
                         </td>
-                        <td className="py-md px-lg text-secondary">{src.total} picks</td>
-                        <td className="py-md px-lg text-secondary text-xs">{timeAgo(src.lastPickAt)}</td>
+                        <td className="py-md px-lg font-mono text-xs">
+                          {c.won}W-{c.lost}L{c.push ? `-${c.push}P` : ''}
+                        </td>
+                        <td className={`py-md px-lg text-xs font-semibold ${c.roi >= 0 ? 'text-utility-success-700' : 'text-utility-error-700'}`}>{pct(c.roi)}</td>
+                        <td className="py-md px-lg text-secondary text-xs">{c.reason}</td>
+                        <td className="py-md px-lg">
+                          <ProofLink url={c.explorerUrl} blobId={c.blobId} />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {stats.some((s) => !credBoard.some((c) => c.source.toLowerCase() === s.source.toLowerCase())) && (
+              <div className="space-y-sm">
+                <h2 className="text-base font-bold">Waiting for results</h2>
+                <div className="flex flex-wrap gap-xs">
+                  {stats
+                    .filter((s) => !credBoard.some((c) => c.source.toLowerCase() === s.source.toLowerCase()))
+                    .map((s) => (
+                      <span key={s.source} className="px-md py-xxs rounded-sm bg-secondary border border-secondary text-xs text-secondary">
+                        {s.source} · {s.pending} open
+                      </span>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {credHistory.length > 0 && (
+              <div className="space-y-sm">
+                <h2 className="text-base font-bold">How Receipts changed its mind</h2>
+                <p className="text-xs text-tertiary">Append-only: each line is its own Walrus memory and names the score it replaced.</p>
+                <ol className="space-y-xs">
+                  {credHistory.map((h) => (
+                    <li key={h.blobId} className="p-md rounded-md bg-secondary border border-secondary text-xs flex flex-col md:flex-row md:items-center justify-between gap-xs">
+                      <span className="text-secondary">
+                        <span className="text-tertiary">{new Date(h.recordedAt).toLocaleString()} · </span>
+                        {h.text}
+                      </span>
+                      <ProofLink url={h.explorerUrl} blobId={h.blobId} />
+                    </li>
+                  ))}
+                </ol>
               </div>
             )}
           </div>
@@ -559,7 +723,7 @@ export default function App() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-lg">
               <StatCard label="Network" value={networkLabel} hint={network === 'mainnet' ? 'Counts toward the submission' : 'Switch to mainnet before submitting'} />
-              <StatCard label="Memories Stored" value={`${memories.length}`} hint="Across picks, credibility and profile" brand />
+              <StatCard label="Memories Stored" value={`${memories.length}`} hint="Picks, grades, credibility and profile" brand />
               <div className="p-xl rounded-md bg-secondary border border-secondary">
                 <span className="text-xs text-tertiary uppercase font-semibold tracking-wider">Mainnet Requirement</span>
                 <div className="text-heading-sm font-bold mt-xs">
@@ -571,6 +735,44 @@ export default function App() {
                     style={{ width: `${network === 'mainnet' ? Math.min(100, (memories.length / MAINNET_MEMORY_GOAL) * 100) : 0}%` }}
                   ></div>
                 </div>
+              </div>
+            </div>
+
+            <div className="p-xl rounded-md bg-secondary border border-secondary space-y-md">
+              <div className="flex items-center gap-xs text-base font-bold">
+                <Brain className="w-4 h-4 text-brand-primary" /> What Receipts knows about you
+              </div>
+              {learningError && <ErrorBox message={learningError} />}
+              {profile && profile.patterns.length === 0 && (
+                <p className="text-xs text-secondary">
+                  No strong patterns yet. Receipts calls something a pattern once 5 graded picks in a league, market or price range are clearly winning or losing.
+                </p>
+              )}
+              {profile?.patterns.map((p) => (
+                <div key={p.key} className={`text-xs px-sm py-xs rounded-sm border flex flex-wrap items-center gap-xs ${ADVICE_STYLES[p.verdict === 'leak' ? 'warn' : 'good']}`}>
+                  <span>{p.text}</span>
+                  <ProofLink url={p.explorerUrl} blobId={p.blobId} />
+                </div>
+              ))}
+              <div className="flex flex-wrap items-center gap-sm text-xs text-secondary pt-xs border-t border-secondary">
+                <span>Warn me after</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="20"
+                  value={limitInput}
+                  onChange={(e) => setLimitInput(e.target.value)}
+                  className="w-16 px-sm py-xxs rounded-sm bg-tertiary border border-secondary text-primary"
+                />
+                <span>losing picks in one day</span>
+                <button onClick={handleSetLimit} className="px-md py-xxs rounded-sm bg-brand-solid text-primary-on-brand font-semibold">
+                  Remember this
+                </button>
+                {profile?.limit?.maxDailyLosses && (
+                  <span className="text-tertiary">
+                    Current: {profile.limit.maxDailyLosses} · <ProofLink url={profile.limit.explorerUrl} blobId={profile.limit.blobId} />
+                  </span>
+                )}
               </div>
             </div>
 

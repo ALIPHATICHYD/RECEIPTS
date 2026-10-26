@@ -12,12 +12,15 @@ Built for the Tatum x Walrus **Total Recall** hackathon (Track 01: Markets & Spo
 - **Paste a tip**: paste a tipster's post and Receipts pre-fills the form (matchup, spread/total/moneyline/yes-no, odds, units). You confirm before anything is stored.
 - **Feed and source leaderboard**, rebuilt from Walrus Memory on every load.
 - **Memory inspector** listing every memory the app has written, by namespace, with blob links and progress toward the 10-memory Mainnet requirement.
+- **Grading**: mark each open pick Won, Lost or Push. The grade is its own memory; the pick record is never rewritten.
+- **Credibility per source × league**: a trust score (win rate pulled toward 50% until there is enough evidence), record, ROI and closing-line value. Every change is a new memory that names the score it supersedes, and the Sources tab shows the full timeline of how Receipts changed its mind.
+- **Your own patterns**: once 5 graded picks in a league, market or price range are clearly winning or losing, Receipts remembers it, plus an optional daily loss limit you set.
+- **Advice that cites memory**: open picks are ranked by remembered trust, and each advice line links to the Walrus blob it came from.
 - **Sui wallet reader** for SUI and USDC balances through the Tatum Sui Mainnet RPC gateway.
 
 ## Coming next
 
-- Automatic grading after each event, and append-only credibility scores per source and league
-- Agent advice that cites the memories it used
+- Prediction-market picks from Polymarket and Kalshi via Tatum's Prediction Market API, graded automatically on resolution
 - Pay-per-pick with x402, settled in USDC on Sui and verified through Tatum's Sui RPC
 
 ## How memory is used
@@ -25,8 +28,9 @@ Built for the Tatum x Walrus **Total Recall** hackathon (Track 01: Markets & Spo
 | Namespace | What is stored |
 |---|---|
 | `receipts-picks` | One memory per pick: a readable sentence for semantic recall, plus the exact JSON record |
+| `receipts-grades` | One memory per grade; the newest grade for a pick decides its status |
 | `receipts-credibility` | Credibility scores per source × league (append-only: a new score supersedes the old one) |
-| `receipts-profile` | The user's own patterns and limits |
+| `receipts-profile` | Patterns in the user's journal and their daily loss limit |
 
 Records are never edited. Grading a pick writes a new record; the newest record per pick wins.
 
@@ -61,7 +65,8 @@ React + TypeScript + Vite + Tailwind, served by one Express process (`server/ind
 
 - `server/memwal-client.mjs`: Walrus Memory client (`@mysten-incubation/memwal`)
 - `server/picks.mjs`: pick record format and the paste-a-tip parser
-- `server/routes/receipts.mjs`: picks and memory API
+- `server/learning.mjs`: grading, credibility scores, patterns and advice
+- `server/routes/receipts.mjs`: picks, grading, credibility, profile and memory API
 - `server/routes/tatum.mjs`, `server/tatum-client.mjs`: Tatum Sui RPC
 - `src/`: frontend
 
