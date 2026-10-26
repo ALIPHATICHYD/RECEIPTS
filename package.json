@@ -4,12 +4,13 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file-if-exists=.env server/index.mjs",
-    "dev:mock": "MEMWAL_MOCK=1 PREDICTION_MOCK=1 node --env-file-if-exists=.env server/index.mjs",
+    "dev:mock": "MEMWAL_MOCK=1 PREDICTION_MOCK=1 PAYMENTS_MOCK=1 node --env-file-if-exists=.env server/index.mjs",
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@mysten-incubation/memwal": "^0.1.9",
+    "@mysten/dapp-kit-react": "^2.1.41",
     "@mysten/seal": "^1.5.1",
     "@mysten/sui": "^2.37.0",
     "@vitejs/plugin-react": "^4.3.1",

@@ -22,11 +22,11 @@ function decodeMarked(text, marker) {
   }
 }
 
-function proof(hit) {
+export function proof(hit) {
   return { blobId: hit.blob_id, explorerUrl: blobExplorerUrl(hit.blob_id) }
 }
 
-async function recallAll(namespace, query) {
+export async function recallAll(namespace, query) {
   const result = await memwal().recall({ query, namespace, limit: 100, sort: 'recent' })
   return result.results
 }

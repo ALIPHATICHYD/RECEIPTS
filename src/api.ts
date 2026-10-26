@@ -55,6 +55,71 @@ export interface Trader {
   pnl: number;
 }
 
+export interface SealedOffer {
+  id: string;
+  source: string;
+  sourceUrl?: string;
+  sourcePlatform?: string;
+  event: string;
+  teaser: string;
+  category: Category;
+  league: string;
+  price: string;
+  payTo: string;
+  commitment: string;
+  createdAt: string;
+  unlocked: { digest: string; payer: string | null; at: string } | null;
+  hidden?: { market: string; side: string; odds: string; notes: string };
+  buyerCount?: number;
+}
+
+export interface PaymentTerms {
+  scheme: 'exact';
+  network: string;
+  maxAmountRequired: string;
+  payTo: string;
+  asset: string;
+}
+
+export interface WalletUnlock {
+  pick: { market: string; side: string; odds: string; notes: string; event: string };
+  digest: string;
+  txUrl: string | null;
+}
+
+export interface SealInput {
+  source: string;
+  event: string;
+  teaser: string;
+  market: string;
+  side: string;
+  odds: string;
+  price: string;
+  payTo: string;
+}
+
+export interface AgentDecision extends MemoryRef {
+  type: 'decision' | 'sealed';
+  offerId: string;
+  source: string;
+  league: string;
+  decision?: 'paid' | 'skipped';
+  reason?: string;
+  digest?: string;
+  price: string;
+  recordedAt: string;
+  text: string;
+}
+
+export interface BuyResult {
+  decision: 'paid' | 'skipped';
+  reason: string;
+  sentence: string;
+  digest?: string;
+  txUrl?: string | null;
+  pick?: PickRecord;
+}
+
 export interface LivePrice {
   pickId: string;
   price: number | null;
@@ -172,6 +237,29 @@ export const api = {
   livePrices: () => call<{ prices: LivePrice[] }>('/api/prediction/live'),
   settle: () =>
     call<{ checked: number; graded: { pickId: string; result: string; winner: string }[]; learned: string[] }>('/api/prediction/settle', { method: 'POST' }),
+  offers: () => call<{ network: string; mock: boolean; offers: SealedOffer[] }>('/api/x402/offers'),
+  sealPick: (input: SealInput) => call<{ offer: SealedOffer; jobId: string }>('/api/x402/offers', { method: 'POST', body: JSON.stringify(input) }),
+  agentWallet: () => call<{ address: string; network: string; mock: boolean; sui: string; usdc: string }>('/api/agent/wallet'),
+  agentDecisions: () => call<{ records: AgentDecision[] }>('/api/agent/decisions'),
+  agentBuy: (offerId: string, minTrust: number, maxPrice: string) =>
+    call<BuyResult>('/api/agent/buy', { method: 'POST', body: JSON.stringify({ offerId, minTrust, maxPrice }) }),
+  x402Config: () => call<{ network: string; mock: boolean; usdcType: string }>('/api/x402/config'),
+  // The x402 resource answers 402 with its terms until it gets a payment proof.
+  offerTerms: async (offerId: string): Promise<PaymentTerms> => {
+    const res = await fetch(`/api/x402/offers/${encodeURIComponent(offerId)}/pick`);
+    const body = await res.json().catch(() => ({}));
+    const terms = body.accepts?.find((a: PaymentTerms) => a.scheme === 'exact');
+    if (res.status !== 402 || !terms) throw new Error(body.error || `Expected payment terms, got ${res.status}`);
+    return terms;
+  },
+  unlockWithPayment: async (offerId: string, network: string, transactionDigest: string) => {
+    const header = btoa(JSON.stringify({ x402Version: 1, scheme: 'exact', network, payload: { transactionDigest } }));
+    const res = await fetch(`/api/x402/offers/${encodeURIComponent(offerId)}/pick`, { headers: { 'X-PAYMENT': header } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Payment not accepted (${res.status})`);
+    const net = network.replace(/^sui-/, '');
+    return { pick: body.pick as WalletUnlock['pick'], txUrl: transactionDigest.startsWith('mock') ? null : `https://suiscan.xyz/${net}/tx/${transactionDigest}` };
+  },
   suiBalance: (address: string) =>
     call<{ sui: string; usdc: string }>(`/api/sui/balance?address=${encodeURIComponent(address)}`),
 };

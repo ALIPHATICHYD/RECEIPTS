@@ -14,3 +14,7 @@ dist/
 
 # The template is safe to commit; it holds no values.
 !.env.example
+
+# Local state for sealed x402 picks (hidden pick text, salts, used payment digests).
+data/
+*.tsbuildinfo
