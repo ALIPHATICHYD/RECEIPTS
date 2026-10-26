@@ -72,12 +72,14 @@ export function searchText(input) {
   return { text: words.replace(/[^\p{L}\p{N}' ]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 60), slug: slug?.toLowerCase() ?? null }
 }
 
+// Tatum requires `platform` on /events (it answers 400 without it), and the
+// params below are the exact set the live probe got a 200 for.
 // Active markets matching a search, flattened out of their events, busiest
 // first. For a pasted link, markets from that exact event come first.
 export async function searchMarkets(input) {
   const { text, slug } = searchText(input)
   if (text.length < 2) return []
-  const events = await get(`/events?${qs({ status: 'active', search: text, limit: 6, includeMarkets: true })}`, 5 * 60_000)
+  const events = await get(`/events?${qs({ platform: 'polymarket', status: 'active', search: text, limit: 6, includeMarkets: true })}`, 5 * 60_000)
   const exact = (m) => (slug && m.url?.toLowerCase().includes(`/${slug}`) ? 1 : 0)
   return events
     .flatMap((e) => (e.markets ?? []).filter((m) => typeof m === 'object').map((m) => summarizeMarket(m, e.title)))
@@ -92,7 +94,7 @@ export async function getMarket(id, ttlMs = 60_000) {
 }
 
 export async function topTraders(category = 'SPORTS', timePeriod = 'MONTH', limit = 10) {
-  return get(`/top-traders?${qs({ category, timePeriod, orderBy: 'PNL', limit })}`, 10 * 60_000)
+  return get(`/top-traders?${qs({ category, timePeriod, limit })}`, 10 * 60_000)
 }
 
 export async function walletTrades(wallet, limit = 25) {
