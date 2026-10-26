@@ -608,7 +608,19 @@ export default function App() {
                         <Clock className="w-3 h-3" />
                         {timeAgo(pick.loggedAt)}
                       </span>
-                      <span className="text-xs font-medium text-brand-primary">{pick.source}</span>
+                      {pick.sourceUrl ? (
+                        <a
+                          href={pick.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-medium text-brand-primary inline-flex items-center gap-xxs hover:underline"
+                          title={pick.sourceUrl}
+                        >
+                          {pick.source} <span className="text-tertiary font-normal">on {pick.sourcePlatform}</span> <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <span className="text-xs font-medium text-brand-primary">{pick.source}</span>
+                      )}
                       {pick.marketId && (
                         <a
                           href={pick.marketUrl ?? undefined}
@@ -646,7 +658,12 @@ export default function App() {
                       )}
                     </div>
                     <div className="min-w-[80px] text-center">
-                      <div className="text-xs text-tertiary uppercase font-medium">Source Trust</div>
+                      <div
+                        className="text-xs text-tertiary uppercase font-medium"
+                        title="Receipts' 0-100 score for this source in this league, learned from graded picks. 50 is neutral; a dash means none of their picks here are graded yet."
+                      >
+                        Source Trust
+                      </div>
                       <div className="text-sm font-bold text-brand-primary">{pick.trust ?? '—'}</div>
                       <div className="w-16 h-1.5 bg-tertiary rounded-full overflow-hidden mx-auto mt-xxs">
                         <div className="h-full bg-brand-solid" style={{ width: `${pick.trust ?? 0}%` }}></div>
@@ -778,8 +795,8 @@ export default function App() {
                   </select>
                 </div>
                 <div className="space-y-xs">
-                  <label className="text-xs font-medium text-secondary uppercase tracking-wider">Source Handle</label>
-                  <input type="text" placeholder="@tipster or @me" value={form.source} onChange={(e) => updateForm('source', e.target.value)} className={inputClass} required />
+                  <label className="text-xs font-medium text-secondary uppercase tracking-wider">Source (handle or link)</label>
+                  <input type="text" placeholder="@tipster, @me, or a profile or post link" value={form.source} onChange={(e) => updateForm('source', e.target.value)} className={inputClass} required />
                 </div>
               </div>
 

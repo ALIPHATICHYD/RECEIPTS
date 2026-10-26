@@ -21,6 +21,8 @@ export interface PickRecord {
   grade?: { result: PickStatus; closingOdds: string | null; gradedAt: string; blobId?: string; explorerUrl?: string | null } | null;
   trust?: number | null;
   advice?: Advice[];
+  sourceUrl?: string;
+  sourcePlatform?: string;
   platform?: 'polymarket' | 'kalshi';
   marketId?: string;
   outcome?: string;

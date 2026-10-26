@@ -50,6 +50,42 @@ function normalizeHandle(handle) {
   return h ? `@${h}` : '@me'
 }
 
+// A source can be given as a profile link instead of a bare handle, so the pick
+// names the exact account. The handle stays the credibility key; the link and
+// platform are kept alongside it.
+const PROFILE_HOSTS = [
+  ['X', /^(?:www\.|mobile\.)?(?:x|twitter)\.com$/, (p) => p[0]],
+  ['Telegram', /^(?:www\.)?(?:t\.me|telegram\.me)$/, (p) => (p[0] === 's' ? p[1] : p[0])],
+  ['Instagram', /^(?:www\.)?instagram\.com$/, (p) => p[0]],
+  ['TikTok', /^(?:www\.)?tiktok\.com$/, (p) => p[0]],
+  ['YouTube', /^(?:www\.|m\.)?youtube\.com$/, (p) => (p[0] === 'c' || p[0] === 'channel' ? p[1] : p[0])],
+  // Only profile pages name a person; a market page (/event, /predictions) does not.
+  ['Polymarket', /^(?:www\.)?polymarket\.com$/, (p) => (p[0] === 'profile' ? p[1] : p[0]?.startsWith('@') ? p[0] : 'polymarket')],
+  ['Discord', /^(?:www\.)?discord\.(?:gg|com)$/, (p) => p[p.length - 1]],
+]
+const PROFILE_URL_RE = /https?:\/\/[^\s)]+/i
+
+export function parseSource(value) {
+  const raw = clean(value, 300)
+  let url
+  try {
+    url = /^https?:\/\//i.test(raw) ? new URL(raw) : /^[\w.-]+\.[a-z]{2,}\/\S+/i.test(raw) ? new URL(`https://${raw}`) : null
+  } catch {
+    url = null
+  }
+  if (!url) return { source: normalizeHandle(raw) }
+  const parts = url.pathname.split('/').filter(Boolean)
+  const host = url.hostname.toLowerCase()
+  const known = PROFILE_HOSTS.find(([, re]) => re.test(host))
+  const name = known ? known[2](parts) : parts[parts.length - 1]
+  const handle = String(name ?? host.replace(/^www\./, '')).replace(/^@+/, '').slice(0, 64)
+  return {
+    source: normalizeHandle(handle),
+    sourceUrl: `${url.origin}${url.pathname}`.replace(/\/+$/, ''),
+    sourcePlatform: known ? known[0] : host.replace(/^www\./, ''),
+  }
+}
+
 export function validatePickInput(body) {
   const pick = {
     id: randomUUID(),
@@ -57,7 +93,7 @@ export function validatePickInput(body) {
     market: clean(body?.market, 80),
     side: clean(body?.side, 120),
     odds: clean(body?.odds, 20),
-    source: normalizeHandle(body?.source),
+    ...parseSource(body?.source),
     category: CATEGORIES.includes(body?.category) ? body.category : 'Sports',
     confidence: Math.min(100, Math.max(0, Math.round(Number(body?.confidence) || 0))),
     notes: clean(body?.notes, 500),
@@ -87,7 +123,7 @@ export function validatePickInput(body) {
 
 export function encodePick(pick) {
   const sentence =
-    `Receipt: ${pick.source} picked ${pick.side} (${pick.market}) for ${pick.event} ` +
+    `Receipt: ${pick.source}${pick.sourcePlatform ? ` (${pick.sourcePlatform}, ${pick.sourceUrl})` : ''} picked ${pick.side} (${pick.market}) for ${pick.event} ` +
     `[${pick.category}]${pick.odds ? ` at ${pick.odds}` : ''} with ${pick.confidence}% confidence, ` +
     `logged ${pick.loggedAt}.` +
     `${pick.marketId ? ` Linked to ${pick.platform} market ${pick.marketId}.` : ''}${pick.notes ? ` Notes: ${pick.notes}` : ''}`
@@ -147,7 +183,8 @@ export function parseTip(raw, fallbackSource) {
     market: '',
     side: '',
     odds: '',
-    source: normalizeHandle(text.match(/@(\w{2,30})/)?.[1] || fallbackSource),
+    // A profile link in the tip beats an @mention, which beats the fallback.
+    source: text.match(PROFILE_URL_RE)?.[0] || text.match(/@(\w{2,30})/)?.[1] || fallbackSource || '',
     category: 'Sports',
     confidence: 60,
     notes: text.slice(0, 280),
