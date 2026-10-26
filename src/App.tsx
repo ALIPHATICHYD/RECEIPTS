@@ -34,6 +34,7 @@ import {
   type Advice,
   type CredibilityRecord,
   type ProfileData,
+  type GradeResult,
   type PredictionMarket,
   type Trader,
   type LivePrice,
@@ -80,7 +81,7 @@ function StatCard({ label, value, hint, brand }: { label: string; value: string;
   return (
     <div className="p-xl rounded-md bg-secondary border border-secondary">
       <span className="text-xs text-tertiary uppercase font-semibold tracking-wider">{label}</span>
-      <div className={`text-heading-sm font-bold mt-xs ${brand ? 'text-brand-primary' : ''}`}>{value}</div>
+      <div className={`text-heading-sm font-bold mt-xs truncate ${brand ? 'text-brand-primary' : ''}`} title={value}>{value}</div>
       <div className="text-xs text-secondary mt-xxs">{hint}</div>
     </div>
   );
@@ -149,7 +150,7 @@ function AdviceList({ advice }: { advice: Advice[] }) {
   );
 }
 
-function GradeButtons({ busy, onGrade }: { busy: boolean; onGrade: (r: 'won' | 'lost' | 'push') => void }) {
+function GradeButtons({ busy, onGrade, current, onCancel }: { busy: boolean; onGrade: (r: GradeResult) => void; current?: PickRecord['status']; onCancel?: () => void }) {
   if (busy) {
     return (
       <span className="text-xs text-tertiary flex items-center gap-xxs">
@@ -163,6 +164,14 @@ function GradeButtons({ busy, onGrade }: { busy: boolean; onGrade: (r: 'won' | '
       <button onClick={() => onGrade('won')} className={`${btn} border-utility-success-200 bg-utility-success-50 text-utility-success-700`}>Won</button>
       <button onClick={() => onGrade('lost')} className={`${btn} border-utility-error-200 bg-utility-error-50 text-utility-error-700`}>Lost</button>
       <button onClick={() => onGrade('push')} className={`${btn} border-secondary bg-tertiary text-secondary`}>Push</button>
+      {current && current !== 'pending' && (
+        <button onClick={() => onGrade('pending')} className={`${btn} border-secondary bg-tertiary text-secondary`} title="Withdraw the grade and mark the pick open again">
+          Reopen
+        </button>
+      )}
+      {onCancel && (
+        <button onClick={onCancel} className="px-xs text-xs text-tertiary underline">Cancel</button>
+      )}
     </div>
   );
 }
@@ -204,6 +213,7 @@ export default function App() {
   const [formError, setFormError] = useState<string | null>(null);
 
   const [gradingId, setGradingId] = useState<string | null>(null);
+  const [regradeId, setRegradeId] = useState<string | null>(null);
   const [learned, setLearned] = useState<string[] | null>(null);
   const [credBoard, setCredBoard] = useState<CredibilityRecord[]>([]);
   const [credHistory, setCredHistory] = useState<CredibilityRecord[]>([]);
@@ -296,15 +306,18 @@ export default function App() {
     if (activeTab === 'sources' || activeTab === 'memory') loadLearning();
   }, [activeTab, loadLearning]);
 
-  const handleGrade = async (pick: PickRecord, result: 'won' | 'lost' | 'push') => {
+  const handleGrade = async (pick: PickRecord, result: GradeResult) => {
     setGradingId(pick.id);
+    setRegradeId(null);
     setPicksError(null);
     try {
       const res = await api.gradePick(pick.id, result);
       setLearned([res.credibility, ...res.patterns]);
-      // The relayer indexes the new memories in the background; give it a moment
-      // before re-reading so the feed shows the updated trust.
-      await new Promise((r) => setTimeout(r, 4000));
+      // Show the new grade and score straight away; recall from Walrus lags the write.
+      setPicks((prev) => prev.map((p) => (p.source === pick.source && p.league === pick.league ? { ...p, trust: res.trust } : p)).map((p) => (p.id === pick.id ? { ...p, status: result } : p)));
+      // Re-read once the grade is stored on Walrus, so the feed comes from memory again.
+      await waitForJob(res.jobId, () => {});
+      await new Promise((r) => setTimeout(r, 3000));
       await loadPicks();
     } catch (err: any) {
       setPicksError(err.message);
@@ -608,7 +621,19 @@ export default function App() {
                         <Clock className="w-3 h-3" />
                         {timeAgo(pick.loggedAt)}
                       </span>
-                      <span className="text-xs font-medium text-brand-primary">{pick.source}</span>
+                      {pick.sourceUrl ? (
+                        <a
+                          href={pick.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-medium text-brand-primary inline-flex items-center gap-xxs hover:underline"
+                          title={pick.sourceUrl}
+                        >
+                          {pick.source} <span className="text-tertiary font-normal">on {pick.sourcePlatform}</span> <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <span className="text-xs font-medium text-brand-primary">{pick.source}</span>
+                      )}
                       {pick.marketId && (
                         <a
                           href={pick.marketUrl ?? undefined}
@@ -646,7 +671,12 @@ export default function App() {
                       )}
                     </div>
                     <div className="min-w-[80px] text-center">
-                      <div className="text-xs text-tertiary uppercase font-medium">Source Trust</div>
+                      <div
+                        className="text-xs text-tertiary uppercase font-medium"
+                        title="Receipts' 0-100 score for this source in this league, learned from graded picks. 50 is neutral; a dash means none of their picks here are graded yet."
+                      >
+                        Source Trust
+                      </div>
                       <div className="text-sm font-bold text-brand-primary">{pick.trust ?? '—'}</div>
                       <div className="w-16 h-1.5 bg-tertiary rounded-full overflow-hidden mx-auto mt-xxs">
                         <div className="h-full bg-brand-solid" style={{ width: `${pick.trust ?? 0}%` }}></div>
@@ -658,6 +688,19 @@ export default function App() {
                         <GradeButtons busy={gradingId === pick.id} onGrade={(result) => handleGrade(pick, result)} />
                       )}
                       {pick.grade?.blobId && <ProofLink url={pick.grade.explorerUrl} blobId={pick.grade.blobId} />}
+                      {pick.status !== 'pending' &&
+                        (regradeId === pick.id || gradingId === pick.id ? (
+                          <GradeButtons
+                            busy={gradingId === pick.id}
+                            current={pick.status}
+                            onGrade={(result) => handleGrade(pick, result)}
+                            onCancel={() => setRegradeId(null)}
+                          />
+                        ) : (
+                          <button onClick={() => setRegradeId(pick.id)} className="text-xs text-tertiary underline" title="Graded by mistake? Change it. The correction is saved as a new memory.">
+                            Change grade
+                          </button>
+                        ))}
                     </div>
                   </div>
                 </div>
@@ -712,7 +755,7 @@ export default function App() {
                   <form onSubmit={handleSearchMarkets} className="flex gap-sm">
                     <input
                       type="text"
-                      placeholder="Search live markets, e.g. Senate, Ballon d'Or, Lakers"
+                      placeholder="Search, e.g. Senate, Ballon d'Or, Lakers, or paste a Polymarket link"
                       value={marketQuery}
                       onChange={(e) => setMarketQuery(e.target.value)}
                       className={inputClass}
@@ -750,7 +793,7 @@ export default function App() {
                       ))}
                     </ul>
                   )}
-                  <p className="text-xs text-tertiary">Pick an outcome to fill the form. Prices come from Tatum's prediction market API.</p>
+                  <p className="text-xs text-tertiary">Pick an outcome to fill the form. Markets from a pasted link are listed first. Prices come from Tatum's prediction market API.</p>
                 </>
               )}
             </div>
@@ -778,8 +821,8 @@ export default function App() {
                   </select>
                 </div>
                 <div className="space-y-xs">
-                  <label className="text-xs font-medium text-secondary uppercase tracking-wider">Source Handle</label>
-                  <input type="text" placeholder="@tipster or @me" value={form.source} onChange={(e) => updateForm('source', e.target.value)} className={inputClass} required />
+                  <label className="text-xs font-medium text-secondary uppercase tracking-wider">Source (handle or link)</label>
+                  <input type="text" placeholder="@tipster, @me, or a profile or post link" value={form.source} onChange={(e) => updateForm('source', e.target.value)} className={inputClass} required />
                 </div>
               </div>
 

@@ -26,7 +26,10 @@ async function get(path, ttlMs) {
   } else {
     const res = await tatumFetch(`${BASE}${path}`)
     const body = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(`Tatum prediction API ${res.status}: ${body.message || 'request failed'}`)
+    if (!res.ok) {
+      const detail = Array.isArray(body.data) ? ` (${body.data.join('; ')})` : ''
+      throw new Error(`Tatum prediction API ${res.status}: ${body.message || 'request failed'}${detail}`)
+    }
     data = body.data
   }
   cache.set(path, { data, expires: Date.now() + ttlMs })
@@ -50,12 +53,37 @@ function summarizeMarket(m, eventTitle) {
   }
 }
 
-// Active markets matching a search, flattened out of their events, busiest first.
-export async function searchMarkets(query) {
-  const events = await get(`/events?${qs({ status: 'active', search: query, limit: 6, includeMarkets: true })}`, 5 * 60_000)
+const ALIASES = { btc: 'bitcoin', eth: 'ethereum', sol: 'solana', xrp: 'xrp', updown: 'up or down' }
+
+// Turn what the user typed into Tatum search text. A pasted Polymarket or Kalshi
+// link becomes words from its slug (Tatum rejects URLs as search text), e.g.
+// polymarket.com/event/btc-updown-5m-1793010900 -> "bitcoin up or down".
+export function searchText(input) {
+  const raw = String(input ?? '').trim()
+  const slug = raw.match(/(?:polymarket|kalshi)\.com\/(?:[a-z]{2}\/)?(?:event|market|markets)\/([^/?#\s]+)/i)?.[1]
+  const words = slug
+    ? slug
+        .toLowerCase()
+        .split('-')
+        .filter((w) => !/^(\d{5,}|\d+[a-z])$/.test(w)) // timestamps and "5m"-style windows; years stay
+        .map((w) => ALIASES[w] ?? w)
+        .join(' ')
+    : raw
+  return { text: words.replace(/[^\p{L}\p{N}' ]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 60), slug: slug?.toLowerCase() ?? null }
+}
+
+// Tatum answered 400 to /events without `platform`; these params are the set
+// the live probe got a 200 for.
+// Active markets matching a search, flattened out of their events, busiest
+// first. For a pasted link, markets from that exact event come first.
+export async function searchMarkets(input) {
+  const { text, slug } = searchText(input)
+  if (text.length < 2) return []
+  const events = await get(`/events?${qs({ platform: 'polymarket', status: 'active', search: text, limit: 6, includeMarkets: true })}`, 5 * 60_000)
+  const exact = (m) => (slug && m.url?.toLowerCase().includes(`/${slug}`) ? 1 : 0)
   return events
     .flatMap((e) => (e.markets ?? []).filter((m) => typeof m === 'object').map((m) => summarizeMarket(m, e.title)))
-    .sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0))
+    .sort((a, b) => exact(b) - exact(a) || (b.volume ?? 0) - (a.volume ?? 0))
     .slice(0, 12)
 }
 
@@ -66,7 +94,7 @@ export async function getMarket(id, ttlMs = 60_000) {
 }
 
 export async function topTraders(category = 'SPORTS', timePeriod = 'MONTH', limit = 10) {
-  return get(`/top-traders?${qs({ category, timePeriod, orderBy: 'PNL', limit })}`, 10 * 60_000)
+  return get(`/top-traders?${qs({ category, timePeriod, limit })}`, 10 * 60_000)
 }
 
 export async function walletTrades(wallet, limit = 25) {

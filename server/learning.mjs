@@ -3,7 +3,7 @@
 // pattern is a new memory that names the one it supersedes, so the history of how
 // Receipts changed its mind stays readable in the memory inspector.
 import { memwal, blobExplorerUrl, NAMESPACES } from './memwal-client.mjs'
-import { decodePick, decodeGrade, decimalOdds, detectLeague } from './picks.mjs'
+import { decodePick, decodeGrade, decimalOdds, detectLeague, parseSource } from './picks.mjs'
 
 const CRED_MARKER = 'RECEIPTS_CRED_V1 '
 const PROFILE_MARKER = 'RECEIPTS_PROFILE_V1 '
@@ -47,6 +47,9 @@ export async function loadPicks() {
     const pick = decodePick(hit.text)
     if (!pick || picks.has(pick.id)) continue
     pick.league ||= detectLeague(`${pick.event} ${pick.notes}`, pick.category)
+    // Picks saved before sources could be links stored the raw URL as the
+    // handle ("@https://…"). Read them back as the handle the link names.
+    if (/^@https?:\/\//i.test(pick.source)) Object.assign(pick, parseSource(pick.source.slice(1)))
     picks.set(pick.id, { ...pick, ...proof(hit), grade: null })
   }
 
@@ -120,7 +123,7 @@ export async function writeCredibility(picks, pick, previous) {
   const score = scoreSource(picks, pick.source, pick.league)
   const prevTrust = previous?.trust ?? 50
   const move = score.trust === prevTrust ? `stays at ${score.trust}` : `moved from ${prevTrust} to ${score.trust}`
-  const verb = pick.status === 'push' ? 'pushed' : pick.status
+  const verb = pick.status === 'push' ? 'pushed' : pick.status === 'pending' ? 'had its grade withdrawn' : pick.status
   const sentence =
     `Credibility update: ${score.source} on ${score.league} ${move} after ${pick.event} (${pick.side}) ${verb}. ` +
     `Record ${score.won}W-${score.lost}L-${score.push}P over ${plural(score.n, 'graded pick')}, ${pct(score.roi)} ROI` +

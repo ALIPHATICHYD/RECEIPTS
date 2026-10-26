@@ -27,7 +27,7 @@ function fail(res, err, fallback) {
 const WALLET_RE = /^0x[0-9a-f]{40}$/i
 
 router.get('/search', async (req, res) => {
-  const q = String(req.query.q ?? '').trim().slice(0, 80)
+  const q = String(req.query.q ?? '').trim().slice(0, 300)
   if (q.length < 2) return res.status(400).json({ error: 'Type at least 2 characters' })
   try {
     res.json({ markets: await searchMarkets(q) })

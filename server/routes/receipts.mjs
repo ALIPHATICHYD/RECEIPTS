@@ -60,7 +60,12 @@ router.get('/picks', async (_req, res) => {
   try {
     const [picks, credibility, profile] = await Promise.all([loadPicks(), loadCredibility(), loadProfile()])
     const advice = new Map(adviseOpenPicks(picks, credibility, profile).map((a) => [a.pickId, a]))
-    const enriched = picks.map((p) => ({ ...p, trust: advice.get(p.id)?.trust ?? null, advice: advice.get(p.id)?.advice ?? [] }))
+    // Settled picks show the source's current remembered score too, not a dash.
+    const enriched = picks.map((p) => ({
+      ...p,
+      trust: advice.get(p.id)?.trust ?? credibility.current.get(credKey(p.source, p.league))?.trust ?? null,
+      advice: advice.get(p.id)?.advice ?? [],
+    }))
     const open = enriched.filter((p) => p.status === 'pending').sort((a, b) => (b.trust ?? 50) - (a.trust ?? 50) || b.loggedAt.localeCompare(a.loggedAt))
     const settled = enriched.filter((p) => p.status !== 'pending').sort((a, b) => b.grade.gradedAt.localeCompare(a.grade.gradedAt))
     res.json({ network: memwalNetwork(), picks: [...open, ...settled] })
@@ -98,6 +103,7 @@ router.post('/picks/:id/grade', async (req, res) => {
     const state = await loadState()
     const pick = state.picks.find((p) => p.id === req.params.id)
     if (!pick) return res.status(404).json({ error: 'Pick not found in memory' })
+    if (result === 'pending' && pick.status === 'pending') return res.status(400).json({ error: 'This pick is already open' })
     const grade = { pickId: pick.id, result, closingOdds: closingOdds || null, gradedAt: new Date().toISOString() }
     res.status(202).json(await gradeAndLearn(state, pick, grade))
   } catch (err) {
