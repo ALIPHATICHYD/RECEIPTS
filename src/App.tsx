@@ -57,7 +57,6 @@ import { Logo, PageHead, Row, Rule, Slip, Stamp, TrustBar, slipNumber } from './
 type Tab = 'feed' | 'log' | 'sources' | 'agent' | 'memory' | 'wallet';
 type FeedFilter = 'all' | Category;
 
-const MAINNET_MEMORY_GOAL = 10;
 
 const EMPTY_FORM: PickInput = {
   event: '',
@@ -1449,15 +1448,13 @@ export default function App() {
             </PageHead>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-lg">
-              <StatCard label="Network" value={networkLabel} hint={network === 'mainnet' ? 'Counts toward the submission' : 'Switch to mainnet before submitting'} />
+              <StatCard label="Network" value={networkLabel} hint={network === 'mainnet' ? 'Every blob is on Walrus mainnet' : 'Test network, not permanent'} />
               <StatCard label="Memories stored" value={`${memories.length}`} hint="Picks, grades, credibility and profile" brand />
-              <div className="p-xl bg-secondary border border-primary">
-                <span className="kicker text-tertiary">Mainnet requirement</span>
-                <div className="font-mono text-heading-sm font-bold mt-xs">
-                  {network === 'mainnet' ? Math.min(memories.length, MAINNET_MEMORY_GOAL) : 0} / {MAINNET_MEMORY_GOAL}
-                </div>
-                <div className="font-mono text-sm mt-xs">{asciiProgress(network === 'mainnet' ? memories.length / MAINNET_MEMORY_GOAL : 0)}</div>
-              </div>
+              <StatCard
+                label="Last written"
+                value={timeAgo(memories[0]?.createdAt)}
+                hint={memories[0] ? `To ${memories[0].namespace.replace(/^receipts-/, '')}` : 'Nothing written yet'}
+              />
             </div>
 
             <div className="p-xl bg-secondary border border-primary space-y-md">
@@ -1600,9 +1597,4 @@ export default function App() {
       <SiteFooter full={false} />
     </div>
   );
-}
-
-function asciiProgress(ratio: number, cells = 20) {
-  const filled = Math.max(0, Math.min(cells, Math.round(ratio * cells)));
-  return `[${'#'.repeat(filled)}${'-'.repeat(cells - filled)}]`;
 }
