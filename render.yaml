@@ -1,0 +1,37 @@
+# Render Blueprint for the public Receipts demo (Dashboard > New > Blueprint).
+# Secrets are marked sync: false, so Render asks for them when you create the
+# service; they never live in this file or the repo.
+services:
+  - type: web
+    name: receipts
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: node server/index.mjs
+    healthCheckPath: /api/session
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: MEMWAL_NETWORK
+        value: mainnet
+      - key: PAYMENTS_NETWORK
+        value: mainnet
+      - key: AGENT_MIN_TRUST
+        value: "55"
+      - key: AGENT_MAX_PRICE_USDC
+        value: "0.25"
+      # Required: visitors get a read-only view; this passcode unlocks writes.
+      - key: OWNER_PASSCODE
+        sync: false
+      - key: TATUM_API_KEY
+        sync: false
+      - key: MEMWAL_PRIVATE_KEY
+        sync: false
+      - key: MEMWAL_ACCOUNT_ID
+        sync: false
+      - key: AGENT_SUI_PRIVATE_KEY
+        sync: false
+      - key: SELLER_SUI_ADDRESS
+        sync: false
