@@ -173,7 +173,7 @@ export function Landing({ picks }: { picks: PickRecord[] }) {
       <section className="bg-ink text-paper">
         <div className="max-w-7xl mx-auto px-xl pt-7xl pb-6xl flex flex-wrap gap-6xl items-center">
           <div className="flex-[999_1_520px] min-w-0 flex flex-col gap-3xl">
-            <span className="kicker text-muted-light">Total Recall · Track 01 · Markets + Sports</span>
+            <span className="kicker text-muted-light">Pick journal · Walrus Memory · Sui</span>
             <h1 className="font-display text-[clamp(60px,9vw,136px)] leading-[0.86]">
               Who was
               <br />

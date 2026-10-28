@@ -127,9 +127,15 @@ function ErrorBox({ message }: { message: string }) {
   return (
     <div className="p-md bg-utility-error-50 border-l-4 border-stamp text-utility-error-700 text-xs flex items-start gap-xs">
       <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-      <span>{message}</span>
+      <span>{friendlyError(message)}</span>
     </div>
   );
+}
+
+// Raw relayer bodies are for the server log, not for visitors.
+function friendlyError(message: string) {
+  if (/\(429\)|rate limit/i.test(message)) return 'Walrus Memory is busy right now. Wait a minute and try again.';
+  return message;
 }
 
 const ADVICE_STYLES: Record<Advice['tone'], string> = {
@@ -1239,7 +1245,7 @@ export default function App() {
                   <Bot className="w-4 h-4" /> Agent wallet {agentWallet && <span className="text-tertiary">· SUI {agentWallet.network.toUpperCase()}</span>}
                 </div>
                 {walletSetupError ? (
-                  <ErrorBox message={/AGENT_SUI_PRIVATE_KEY/.test(walletSetupError) ? `${walletSetupError}. Add AGENT_SUI_PRIVATE_KEY to .env and restart the server.` : walletSetupError} />
+                  <ErrorBox message={/AGENT_SUI_PRIVATE_KEY/.test(walletSetupError) ? (canWrite ? 'The agent has no wallet yet. Set AGENT_SUI_PRIVATE_KEY on the server and restart it.' : 'The agent wallet is not set up on this deploy.') : walletSetupError} />
                 ) : agentWallet ? (
                   <>
                     <div className="text-xs text-secondary break-all">{agentWallet.address}</div>
@@ -1307,7 +1313,7 @@ export default function App() {
                   <input className={inputClass} placeholder="Hidden: side, e.g. Celtics -4.5" value={sealForm.side} onChange={(e) => setSealForm({ ...sealForm, side: e.target.value })} required />
                   <input className={inputClass} placeholder="Hidden: odds, e.g. -110" value={sealForm.odds} onChange={(e) => setSealForm({ ...sealForm, odds: e.target.value })} />
                   <input className={inputClass} placeholder="Price in USDC" value={sealForm.price} onChange={(e) => setSealForm({ ...sealForm, price: e.target.value })} />
-                  <input className={`${inputClass} md:col-span-2 font-mono`} placeholder="Pay to (Sui address). Leave empty to use SELLER_SUI_ADDRESS" value={sealForm.payTo} onChange={(e) => setSealForm({ ...sealForm, payTo: e.target.value })} />
+                  <input className={`${inputClass} md:col-span-2 font-mono`} placeholder="Pay to (Sui address), optional" value={sealForm.payTo} onChange={(e) => setSealForm({ ...sealForm, payTo: e.target.value })} />
                   <button type="submit" disabled={sealing} className="btn-ink md:col-span-2 min-h-[44px]">
                     {sealing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Seal it and commit to Walrus
                   </button>
@@ -1459,7 +1465,7 @@ export default function App() {
 
             <div className="p-xl bg-secondary border border-primary space-y-md">
               <div className="flex items-center gap-xs text-md font-bold">
-                <Brain className="w-4 h-4" /> What Receipts knows about you
+                <Brain className="w-4 h-4" /> {canWrite ? 'What Receipts knows about you' : 'What Receipts knows about its owner'}
               </div>
               {learningError && <ErrorBox message={learningError} />}
               {profile && profile.patterns.length === 0 && (
