@@ -16,10 +16,28 @@ module.exports = {
   // Matches the scope tokens.css uses for its dark palette.
   darkMode: ['class', '[data-theme="dark"]'],
   theme: {
-    // Poppins arrives through the tokens' own fontFamily.sans
-    // (--font-family-sans) — no override here, or the token stops being the
-    // single source for the typeface.
-    extend: tokens.theme.extend,
+    // The sans face comes from --font-family-sans, which src/index.css points
+    // at Bricolage Grotesque for the Thermal theme. Figures use JetBrains Mono.
+    extend: {
+      ...tokens.theme.extend,
+      fontFamily: {
+        ...tokens.theme.extend.fontFamily,
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+      },
+      colors: {
+        ...tokens.theme.extend.colors,
+        ink: '#121212',
+        paper: '#F2EFE6',
+        slip: '#FFFDF7',
+        stamp: '#E8461E',
+        'stamp-text': '#C23A15',
+        carbon: '#1F4FD8',
+        'carbon-light': '#7FA0FF',
+        muted: '#5E5A52',
+        'muted-light': '#BDB7AA',
+        'ink-line': '#3A3732',
+      },
+    },
   },
   plugins: [],
 }

@@ -135,6 +135,12 @@ React + TypeScript + Vite + Tailwind, served by one Express process (`server/ind
 - `server/prediction.mjs`, `server/routes/prediction.mjs`: Tatum Prediction Market API (search, live prices, top traders, settlement)
 - `server/owner.mjs`: read-only public mode and the owner passcode
 - `server/routes/tatum.mjs`, `server/tatum-client.mjs`: Tatum API, gateways and the Sui wallet reader
+- `src/Landing.tsx`, `src/SiteFooter.tsx`, `src/thermal.tsx`: landing page, footer and the Thermal UI pieces (slips, stamps, ASCII trust bars)
+- `scripts/footer-stadium.mjs`: draws the dithered stadium footer (`src/assets/footer-stadium.svg`)
 - `src/`: frontend
+
+## Design
+
+The look is "Thermal": every pick is a printed receipt slip with a torn edge and a barcode, and results land as rubber stamps. Paper `#F2EFE6` and ink `#121212`, with stamp orange `#E8461E` for lost and sealed and carbon blue `#1F4FD8` for won and paid. Type is Bricolage Grotesque (condensed 800 for headlines) with JetBrains Mono for figures. Texture comes from dither dots, halftone, film grain and ASCII trust bars like `[######----] 66`. The theme overrides the design-token variables in `src/index.css`, so every token class picks it up.
 
 The initial shell was generated with [Tatum AI Builder](https://ai.tatum.io/) (first commit) and extended from there.

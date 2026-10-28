@@ -34,7 +34,7 @@ export function WalletBuyButton({ offer, mock, onError }: { offer: SealedOffer; 
 
   if (unlock) {
     return (
-      <div className="p-md rounded-md bg-utility-success-50 border border-utility-success-200 text-xs text-utility-success-700 flex flex-wrap items-center gap-xs">
+      <div className="p-md bg-paper text-ink font-mono text-xs flex flex-wrap items-center gap-xs">
         <span>
           Your pick: <strong>{unlock.pick.side}</strong> ({unlock.pick.market}){unlock.pick.odds ? ` at ${unlock.pick.odds}` : ''}.
         </span>
@@ -91,15 +91,15 @@ export function WalletBuyButton({ offer, mock, onError }: { offer: SealedOffer; 
     }
   };
 
-  if (!account && !mock) return null;
+  if (!account && !mock) return <p className="font-mono text-[11px] text-muted-light">CONNECT A SUI WALLET ABOVE TO BUY THIS PICK</p>;
   return (
     <button
       onClick={buy}
       disabled={busy !== null}
-      className="px-md py-xs rounded-md border border-brand bg-primary text-brand-primary text-xs font-semibold flex items-center gap-xxs disabled:opacity-60"
+      className="btn w-full bg-paper text-ink hover:bg-white"
       title={mock ? 'Mock mode: nothing is paid' : `Pay ${offer.price} USDC from ${account ? shortId(account.address) : 'your wallet'}`}
     >
-      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wallet className="w-3.5 h-3.5" />} {busy ?? `Buy with my wallet`}
+      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wallet className="w-3.5 h-3.5" />} {busy ?? `Pay ${offer.price} USDC with my wallet`}
     </button>
   );
 }
