@@ -26,6 +26,12 @@ export function tatumGatewayUrl(chain, network = 'mainnet') {
   return `https://${chain}-${network}.gateway.${tatumDomain()}`
 }
 
+// Sui turned off JSON-RPC on mainnet; its current API is gRPC, which Tatum serves
+// on a separate host (gRPC-web works over plain HTTPS POST).
+export function tatumGrpcUrl(chain, network = 'mainnet') {
+  return `https://${chain}-${network}-grpc.gateway.${tatumDomain()}`
+}
+
 function apiKey() {
   const key = process.env.TATUM_API_KEY
   if (!key) throw new MissingApiKeyError()

@@ -1155,7 +1155,7 @@ export default function App() {
                   <Wallet className="w-4 h-4 text-brand-primary" /> Agent wallet {agentWallet && <span className="text-xs text-tertiary font-normal">Sui {agentWallet.network}</span>}
                 </div>
                 {walletSetupError ? (
-                  <ErrorBox message={`${walletSetupError}. Add AGENT_SUI_PRIVATE_KEY to .env and restart the server.`} />
+                  <ErrorBox message={/AGENT_SUI_PRIVATE_KEY/.test(walletSetupError) ? `${walletSetupError}. Add AGENT_SUI_PRIVATE_KEY to .env and restart the server.` : walletSetupError} />
                 ) : agentWallet ? (
                   <>
                     <div className="text-xs font-mono text-secondary break-all">{agentWallet.address}</div>

@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { tatumApiBase, tatumRpc, MissingApiKeyError } from '../tatum-client.mjs'
+import { tatumApiBase, MissingApiKeyError } from '../tatum-client.mjs'
+import { sui, PaymentConfigError } from '../sui-payments.mjs'
 
 const router = Router()
 
@@ -23,39 +24,18 @@ router.get('/sui/balance', async (req, res) => {
   }
 
   try {
-    // Sui JSON-RPC method: suix_getAllBalances
-    const rpcResponse = await tatumRpc('sui', {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'suix_getAllBalances',
-      params: [address.trim()],
-    })
+    // Sui's gRPC API through Tatum (mainnet JSON-RPC has been switched off).
+    const { balances: balancesList } = await sui().listBalances({ owner: address.trim() })
 
-    if (!rpcResponse.ok) {
-      const errText = await rpcResponse.text()
-      return res.status(rpcResponse.status).json({
-        error: `Tatum Sui gateway responded with ${rpcResponse.status}: ${errText}`,
-      })
-    }
-
-    const data = await rpcResponse.json()
-    if (data.error) {
-      return res.status(400).json({ error: data.error.message || 'Sui RPC returned an error' })
-    }
-
-    const balancesList = data.result || []
-
-    // SUI native coinType: "0x2::sui::SUI" (9 decimals)
-    // Common Native USDC on Sui: "0xdba34672e30cb065b1f93e3ab5522878403066345d8b0255b6b67c53bf77796f::usdc::USDC" (6 decimals)
-    // Also check for Wormhole or bridged USDC: contains "usdc" case-insensitive
+    // SUI native coinType: "0x2::sui::SUI" (9 decimals); USDC (6 decimals) matched by name
     let totalSuiRaw = 0n
     let totalUsdcRaw = 0n
 
     for (const item of balancesList) {
       const coinType = (item.coinType || '').toLowerCase()
-      const totalBalance = BigInt(item.totalBalance || '0')
+      const totalBalance = BigInt(item.balance || '0')
 
-      if (coinType.includes('::sui::sui') || coinType === '0x2::sui::sui') {
+      if (coinType.endsWith('::sui::sui')) {
         totalSuiRaw += totalBalance
       } else if (coinType.includes('usdc')) {
         totalUsdcRaw += totalBalance
@@ -81,7 +61,7 @@ router.get('/sui/balance', async (req, res) => {
       rawBalances: balancesList,
     })
   } catch (error) {
-    if (error instanceof MissingApiKeyError) {
+    if (error instanceof MissingApiKeyError || error instanceof PaymentConfigError) {
       return res.status(500).json({ error: 'TATUM_API_KEY is not set for this workspace' })
     }
     return res.status(500).json({ error: error.message || 'Failed to query Sui gateway' })

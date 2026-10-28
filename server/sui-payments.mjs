@@ -1,12 +1,14 @@
 // USDC payments on Sui for x402, with every chain call going through Tatum's
-// Sui RPC gateway: the agent pays with a signed USDC transfer, and the seller
+// Sui gRPC gateway: the agent pays with a signed USDC transfer, and the seller
 // verifies that transfer (status, recipient, amount, timing) before releasing
 // a pick. No facilitator: the transaction digest is the payment proof.
 import { randomBytes } from 'crypto'
-import { SuiJsonRpcClient, JsonRpcHTTPTransport } from '@mysten/sui/jsonRpc'
+import { SuiGrpcClient } from '@mysten/sui/grpc'
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
 import { Transaction, coinWithBalance } from '@mysten/sui/transactions'
-import { tatumGatewayUrl } from './tatum-client.mjs'
+import { normalizeSuiAddress, normalizeStructTag } from '@mysten/sui/utils'
+import { tatumGrpcUrl } from './tatum-client.mjs'
+import { grpcTransport } from './sui-grpc.mjs'
 
 // Circle's native USDC (docs.sui.io/guides/developer/stablecoins). 6 decimals.
 export const USDC = {
@@ -36,17 +38,20 @@ export function toAtomic(usdc) {
 export const fromAtomic = (atomic) => (Number(BigInt(atomic)) / 10 ** USDC_DECIMALS).toFixed(2)
 
 let client
-function sui() {
+export function sui() {
   if (!process.env.TATUM_API_KEY) throw new PaymentConfigError('TATUM_API_KEY is not set')
-  client ??= new SuiJsonRpcClient({
+  client ??= new SuiGrpcClient({
     network: paymentsNetwork(),
-    transport: new JsonRpcHTTPTransport({
-      url: tatumGatewayUrl('sui', paymentsNetwork()),
-      rpc: { headers: { 'x-api-key': process.env.TATUM_API_KEY } },
-    }),
+    transport: grpcTransport(paymentsNetwork()),
   })
   return client
 }
+
+const errorText = (e) => (typeof e === 'string' ? e : e?.message ?? JSON.stringify(e) ?? 'unknown error')
+
+// Sui stores addresses padded to 64 hex characters; compare them normalized.
+const sameAddress = (a, b) => normalizeSuiAddress(a ?? '0x0') === normalizeSuiAddress(b ?? '0x0')
+const sameCoin = (a, b) => normalizeStructTag(a) === normalizeStructTag(b)
 
 const MOCK_AGENT = `0x${'a9'.repeat(32)}`
 const MOCK_VISITOR = `0x${'b7'.repeat(32)}`
@@ -65,8 +70,12 @@ export function agentAddress() {
 
 export async function balances(address) {
   if (paymentsMock()) return { sui: '1.00', usdc: '2.00' }
-  const all = await sui().getAllBalances({ owner: address })
-  const of = (type) => BigInt(all.find((b) => b.coinType === type)?.totalBalance ?? '0')
+  const { balances: all } = await sui()
+    .listBalances({ owner: address })
+    .catch((err) => {
+      throw new Error(`Tatum Sui gRPC (${tatumGrpcUrl('sui', paymentsNetwork())}) failed reading balances: ${err.message}`)
+    })
+  const of = (type) => BigInt(all.find((b) => sameCoin(b.coinType, type))?.balance ?? '0')
   return { sui: (Number(of('0x2::sui::SUI')) / 1e9).toFixed(3), usdc: fromAtomic(of(usdcType())) }
 }
 
@@ -82,10 +91,10 @@ export async function payUsdc(payTo, amount) {
   const tx = new Transaction()
   tx.setSender(signer.getPublicKey().toSuiAddress())
   tx.transferObjects([coinWithBalance({ type: usdcType(), balance: BigInt(amount) })], payTo)
-  const res = await sui().signAndExecuteTransaction({ transaction: tx, signer, options: { showEffects: true } })
-  if (res.effects?.status?.status !== 'success') throw new Error(`Payment failed on chain: ${res.effects?.status?.error ?? 'unknown error'}`)
-  await sui().waitForTransaction({ digest: res.digest })
-  return res.digest
+  const res = await sui().signAndExecuteTransaction({ transaction: tx, signer })
+  if (res.$kind !== 'Transaction') throw new Error(`Payment failed on chain: ${errorText(res.FailedTransaction.status.error)}`)
+  await sui().waitForTransaction({ digest: res.Transaction.digest })
+  return res.Transaction.digest
 }
 
 // Seller side. A digest pays for an offer only if the transaction succeeded,
@@ -103,18 +112,19 @@ export async function verifyPayment({ digest, payTo, amount, notBefore }) {
   }
   let tx
   try {
-    tx = await sui().getTransactionBlock({ digest, options: { showEffects: true, showBalanceChanges: true, showInput: true } })
+    const res = await sui().getTransaction({ digest, include: { balanceChanges: true, transaction: true } })
+    tx = res.Transaction ?? res.FailedTransaction
   } catch (err) {
-    return { ok: false, reason: `Transaction not found through Tatum Sui RPC: ${err.message}` }
+    return { ok: false, reason: `Transaction not found through Tatum Sui gRPC: ${err.message}` }
   }
-  if (tx.effects?.status?.status !== 'success') return { ok: false, reason: 'Transaction did not succeed' }
+  if (!tx.status?.success) return { ok: false, reason: 'Transaction did not succeed' }
   const received = (tx.balanceChanges ?? [])
-    .filter((c) => c.coinType === usdcType() && c.owner?.AddressOwner?.toLowerCase() === payTo.toLowerCase())
+    .filter((c) => sameCoin(c.coinType, usdcType()) && sameAddress(c.address, payTo))
     .reduce((sum, c) => sum + BigInt(c.amount), 0n)
   if (received < BigInt(amount)) return { ok: false, reason: `Paid ${fromAtomic(received)} USDC to the seller, needs ${fromAtomic(amount)}` }
   const timestampMs = Number(tx.timestampMs ?? 0)
   if (notBefore && timestampMs && timestampMs < new Date(notBefore).getTime()) {
     return { ok: false, reason: 'Transaction is older than this offer' }
   }
-  return { ok: true, payer: tx.transaction?.data?.sender ?? null, paid: received.toString(), timestampMs }
+  return { ok: true, payer: tx.transaction?.sender ?? null, paid: received.toString(), timestampMs }
 }
