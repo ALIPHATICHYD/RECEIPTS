@@ -19,7 +19,14 @@ function scrub(body) {
   // credential can also reach this process directly via the environment
   // (e.g. local dev exporting TATUM_API_KEY with no creds file mounted) —
   // include it so that path is still redacted.
-  const secrets = [...credentialValues(), process.env.TATUM_API_KEY].filter(
+  const env = process.env
+  const secrets = [
+    ...credentialValues(),
+    env.TATUM_API_KEY,
+    env.MEMWAL_PRIVATE_KEY,
+    env.AGENT_SUI_PRIVATE_KEY,
+    env.OWNER_PASSCODE,
+  ].filter(
     (v) => typeof v === 'string' && v.length >= 12,
   )
   if (!secrets.length || body == null) return body

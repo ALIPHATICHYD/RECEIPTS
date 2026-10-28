@@ -28,11 +28,12 @@ const root = path.join(__dirname, '..')
 process.chdir(root)
 
 const app = express()
+app.disable('x-powered-by')
 // Hosted behind one proxy (Render): req.ip should be the visitor, not the proxy.
 app.set('trust proxy', 1)
 app.use(express.json())
 
-// Redact the Tatum API key from every response before it leaves the process.
+// Redact the server's keys and passcode from every response before it leaves the process.
 app.use(credentialGuard)
 
 // Public demo: visitors read, the owner (OWNER_PASSCODE) writes.
@@ -46,7 +47,7 @@ app.use('/api', receiptsRoutes)
 app.use('/api', tatumRoutes)
 // Unknown API paths get a JSON 404 instead of falling through to Vite's SPA
 // fallback, which answers 200 with index.html and crashes the client's JSON reads.
-app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API route. Restart the server to load the latest code.' }))
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API route.' }))
 
 const server = createHttpServer(app)
 

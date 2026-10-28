@@ -17,6 +17,7 @@ function locked(ip) {
 }
 
 function noteFailure(ip) {
+  if (failures.size > 10_000) failures.clear()
   const f = failures.get(ip)
   if (!f || Date.now() - f.since >= WINDOW_MS) failures.set(ip, { count: 1, since: Date.now() })
   else f.count += 1
