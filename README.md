@@ -6,12 +6,14 @@ Tipsters on X, Telegram and WhatsApp delete their losing calls and screenshot th
 
 Built for the Tatum x Walrus **Total Recall** hackathon (Track 01: Markets & Sports Prediction).
 
+**Live demo:** https://receipts-adf6.onrender.com
+
 ## What works today
 
 - **Log a pick** with event, market, side, odds, source and confidence. Each pick becomes a Walrus memory with a blob you can open on Walruscan.
 - **Paste a tip**: paste a tipster's post and Receipts pre-fills the form (matchup, spread/total/moneyline/yes-no, odds, units). You confirm before anything is stored.
 - **Feed and source leaderboard**, rebuilt from Walrus Memory on every load.
-- **Memory inspector** listing every memory the app has written, by namespace, with blob links and progress toward the 10-memory Mainnet requirement.
+- **Memory inspector** listing every memory the app has written, by namespace, with blob links and when each was written.
 - **Grading**: mark each open pick Won, Lost or Push. The grade is its own memory; the pick record is never rewritten.
 - **Credibility per source × league**: a trust score (win rate pulled toward 50% until there is enough evidence), record, ROI and closing-line value. Every change is a new memory that names the score it supersedes, and the Sources tab shows the full timeline of how Receipts changed its mind.
 - **Your own patterns**: once 5 graded picks in a league, market or price range are clearly winning or losing, Receipts remembers it, plus an optional daily loss limit you set.
@@ -65,7 +67,7 @@ Sealed picks commit to their content up front: a SHA-256 of the hidden pick plus
 
 ## Live demo
 
-The hosted demo runs on Walrus Memory Mainnet and Sui mainnet in read-only mode for visitors:
+[receipts-adf6.onrender.com](https://receipts-adf6.onrender.com) runs on Walrus Memory Mainnet and Sui mainnet in read-only mode for visitors:
 
 - **Feed, Sources and Memory** show every pick, grade, trust score and the Walrus blob behind each one.
 - **Agent → Connect Wallet → Buy with my wallet** lets you pay a sealed pick's x402 price (0.05 USDC) from your own Sui wallet and see the pick. You need a little USDC and SUI for gas.
@@ -93,7 +95,7 @@ cp .env.example .env   # fill in your keys
 npm run dev            # http://localhost:3000
 ```
 
-No keys yet? `npm run dev:mock` runs the whole app against an in-memory mock of Walrus Memory (nothing is stored) recorded Tatum prediction market responses, and fake Sui payments.
+No keys yet? `npm run dev:mock` runs the whole app against an in-memory mock of Walrus Memory (nothing is stored), recorded Tatum prediction market responses, and fake Sui payments.
 
 ### Environment
 

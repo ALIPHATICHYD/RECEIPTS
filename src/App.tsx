@@ -1275,6 +1275,7 @@ export default function App() {
                       max="100"
                       value={minTrust}
                       onChange={(e) => setMinTrust(e.target.value)}
+                      readOnly={!canWrite}
                       className="w-20 px-sm py-xxs bg-transparent border border-ink-line text-paper text-right font-bold"
                       aria-label="Minimum trust"
                     />
@@ -1285,6 +1286,7 @@ export default function App() {
                       type="text"
                       value={maxPrice}
                       onChange={(e) => setMaxPrice(e.target.value)}
+                      readOnly={!canWrite}
                       className="w-20 px-sm py-xxs bg-transparent border border-ink-line text-paper text-right font-bold"
                       aria-label="Maximum price"
                     />
@@ -1376,7 +1378,7 @@ export default function App() {
                         {result?.decision === 'skipped' && <AdviceList advice={[{ tone: 'warn', text: `Skipped: ${result.reason}` }]} />}
                         {o.unlocked && (
                           <div className="text-xs text-muted-light flex flex-wrap items-center gap-xs">
-                            <span>LOGGED TO YOUR JOURNAL · PAID IN TX</span>
+                            <span>BOUGHT BY THE AGENT · PAID IN TX</span>
                             {o.unlocked.digest.startsWith('mock') ? (
                               <span>{shortId(o.unlocked.digest)}</span>
                             ) : (
@@ -1479,33 +1481,39 @@ export default function App() {
                   <ProofLink url={p.explorerUrl} blobId={p.blobId} />
                 </div>
               ))}
-              <div className="flex flex-wrap items-center gap-sm text-xs text-secondary pt-md border-t border-dashed border-primary">
-                <span>Warn me after</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="20"
-                  value={limitInput}
-                  onChange={(e) => setLimitInput(e.target.value)}
-                  className="w-16 px-sm py-xxs bg-secondary border border-primary text-primary font-mono"
-                  aria-label="Daily loss limit"
-                />
-                <span>losing picks in one day</span>
-                {canWrite && (
-                  <button onClick={handleSetLimit} className="btn-ink min-h-[32px] px-md text-xs">
-                    Remember this
-                  </button>
-                )}
-                {profile?.limit?.maxDailyLosses && (
-                  <span className="text-tertiary">
-                    Current: {profile.limit.maxDailyLosses} · <ProofLink url={profile.limit.explorerUrl} blobId={profile.limit.blobId} />
-                  </span>
-                )}
-              </div>
+              {(canWrite || profile?.limit?.maxDailyLosses) && (
+                <div className="flex flex-wrap items-center gap-sm text-xs text-secondary pt-md border-t border-dashed border-primary">
+                  {canWrite ? (
+                    <>
+                      <span>Warn me after</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        value={limitInput}
+                        onChange={(e) => setLimitInput(e.target.value)}
+                        className="w-16 px-sm py-xxs bg-secondary border border-primary text-primary font-mono"
+                        aria-label="Daily loss limit"
+                      />
+                      <span>losing picks in one day</span>
+                      <button onClick={handleSetLimit} className="btn-ink min-h-[32px] px-md text-xs">
+                        Remember this
+                      </button>
+                    </>
+                  ) : (
+                    <span>Daily loss limit: warns after {profile?.limit?.maxDailyLosses} losing picks in one day</span>
+                  )}
+                  {profile?.limit?.maxDailyLosses && (
+                    <span className="text-tertiary">
+                      {canWrite && <>Current: {profile.limit.maxDailyLosses} · </>}<ProofLink url={profile.limit.explorerUrl} blobId={profile.limit.blobId} />
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {memoriesError && <ErrorBox message={memoriesError} />}
-            {!memoriesLoading && !memoriesError && memories.length === 0 && <p className="text-sm text-secondary">No memories yet. Log a pick to write the first one.</p>}
+            {!memoriesLoading && !memoriesError && memories.length === 0 && <p className="text-sm text-secondary">No memories yet.</p>}
             {memories.length > 0 && (
               <div className="border border-primary overflow-x-auto bg-secondary">
                 <table className="w-full text-left border-collapse">
