@@ -30,6 +30,47 @@ Built for the Tatum x Walrus **Total Recall** hackathon (Track 01: Markets & Spo
 - **Sui wallet reader** for SUI and USDC balances through the Tatum Sui Mainnet gRPC gateway.
 
 
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Browser
+    UI[React UI]
+    W[Visitor's Sui wallet]
+  end
+  subgraph Server["Express server"]
+    API[Picks, grading, learning]
+    X[x402 sealed picks + agent]
+    R[gRPC-web relay]
+  end
+  WM[(Walrus Memory Mainnet)]
+  PM[Tatum Prediction Market API]
+  SUI[Tatum Sui gRPC gateway]
+  UI --> API --> WM
+  API --> PM
+  UI --> X
+  X -- pay USDC, verify tx --> SUI
+  W --> R --> SUI
+  X --> WM
+```
+
+The loop, end to end:
+
+1. **Record.** A pick (typed, pasted from a tip, linked to a Polymarket market, or copied from a top trader's trade) becomes a memory in `receipts-picks` before the event starts.
+2. **Grade.** When the market settles, Tatum's Prediction Market API says who won and Receipts writes a grade memory; manual grades work the same way. Nothing is overwritten: a correction is a newer grade.
+3. **Learn.** Each grade moves the source's trust in that league, written to `receipts-credibility` as a new memory that names the score it replaces, and spots patterns in your own picks (`receipts-profile`).
+4. **Act on memory.** Advice cites the memories it comes from. The pay-per-pick agent reads a sealed pick's x402 terms, recalls the tipster's trust, and pays in USDC on Sui only if it clears your bar; the payment is verified through Tatum's Sui gRPC gateway before the pick is released, and the decision and its reason go to `receipts-payments`.
+
+Sealed picks commit to their content up front: a SHA-256 of the hidden pick plus a salt is written to Walrus when it is sealed, so after the reveal anyone can check it wasn't changed after the result.
+
+## Live demo
+
+The hosted demo runs on Walrus Memory Mainnet and Sui mainnet in read-only mode for visitors:
+
+- **Feed, Sources and Memory** show every pick, grade, trust score and the Walrus blob behind each one.
+- **Agent → Connect Wallet → Buy with my wallet** lets you pay a sealed pick's x402 price (0.05 USDC) from your own Sui wallet and see the pick. You need a little USDC and SUI for gas.
+- Logging, grading, sealing and running the agent need the owner passcode.
+
 ## How memory is used
 
 | Namespace | What is stored |
@@ -58,7 +99,7 @@ No keys yet? `npm run dev:mock` runs the whole app against an in-memory mock of 
 
 | Variable | Purpose |
 |---|---|
-| `TATUM_API_KEY` | Tatum API key ([dashboard](https://dashboard.tatum.io/)) for the Sui RPC gateway |
+| `TATUM_API_KEY` | Tatum API key ([dashboard](https://dashboard.tatum.io/)) for the Prediction Market API and the Sui gRPC gateway |
 | `MEMWAL_PRIVATE_KEY` | Walrus Memory delegate private key |
 | `MEMWAL_ACCOUNT_ID` | Walrus Memory account object ID |
 | `MEMWAL_NETWORK` | `testnet` (default) or `mainnet` |
@@ -70,8 +111,15 @@ No keys yet? `npm run dev:mock` runs the whole app against an in-memory mock of 
 | `AGENT_MIN_TRUST`, `AGENT_MAX_PRICE_USDC` | Default spending rule (55 and 0.25) |
 | `PAYMENTS_MOCK` | `1` to fake the chain; nothing is paid |
 | `PREDICTION_MOCK` | `1` to serve recorded prediction market responses instead of calling Tatum |
+| `OWNER_PASSCODE` | Set it on a hosted deploy: visitors get a read-only view, and the passcode (Owner login) unlocks changes. Leave it empty locally |
 
 Create the Walrus Memory account and delegate key at [memory.walrus.xyz](https://memory.walrus.xyz) (Mainnet) or [staging.memory.walrus.xyz](https://staging.memory.walrus.xyz) (Testnet).
+
+## Deploy on Render
+
+`render.yaml` is a Render Blueprint: in the Render dashboard choose **New → Blueprint**, pick this repo, and fill in the secrets it asks for (`OWNER_PASSCODE`, `TATUM_API_KEY`, `MEMWAL_PRIVATE_KEY`, `MEMWAL_ACCOUNT_ID`, `AGENT_SUI_PRIVATE_KEY`, `SELLER_SUI_ADDRESS`). It builds the UI with `npm run build` and serves it from the same Express process with `NODE_ENV=production`.
+
+Picks, grades and scores live on Walrus, so they survive redeploys. Sealed-pick offers are kept in `data/offers.json` on the server, which Render's free plan wipes on each deploy or restart; their commitments stay on Walrus.
 
 ## Stack
 
@@ -83,9 +131,10 @@ React + TypeScript + Vite + Tailwind, served by one Express process (`server/ind
 - `server/routes/receipts.mjs`: picks, grading, credibility, profile and memory API
 - `src/WalletBuy.tsx`: wallet connect and buying a sealed pick from the visitor's own wallet
 - `server/sui-grpc.mjs`: Sui gRPC through Tatum's `sui-mainnet-grpc` gateway (Sui has switched JSON-RPC off on mainnet), plus the gRPC-web relay for browsers
-- `server/sui-payments.mjs`, `server/offers.mjs`, `server/routes/x402.mjs`: x402 sealed picks, the paying agent, and payment verification via Tatum Sui RPC
+- `server/sui-payments.mjs`, `server/offers.mjs`, `server/routes/x402.mjs`: x402 sealed picks, the paying agent, and payment verification via Tatum's Sui gRPC gateway
 - `server/prediction.mjs`, `server/routes/prediction.mjs`: Tatum Prediction Market API (search, live prices, top traders, settlement)
-- `server/routes/tatum.mjs`, `server/tatum-client.mjs`: Tatum Sui RPC
+- `server/owner.mjs`: read-only public mode and the owner passcode
+- `server/routes/tatum.mjs`, `server/tatum-client.mjs`: Tatum API, gateways and the Sui wallet reader
 - `src/`: frontend
 
 The initial shell was generated with [Tatum AI Builder](https://ai.tatum.io/) (first commit) and extended from there.

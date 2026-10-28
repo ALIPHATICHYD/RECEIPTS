@@ -46,6 +46,7 @@ import {
   type AgentDecision,
   type BuyResult,
   pct,
+  setOwnerPasscode,
   usd,
 } from './api';
 import { ConnectWallet, WalletBuyButton } from './WalletBuy';
@@ -302,6 +303,33 @@ export default function App() {
       setMemoriesLoading(false);
     }
   }, []);
+
+  // Hosted demo: visitors read only; the owner unlocks writes with a passcode.
+  const [session, setSession] = useState({ readOnly: false, owner: true });
+  const canWrite = !session.readOnly || session.owner;
+  useEffect(() => {
+    api.session().then(setSession).catch(() => {});
+  }, []);
+
+  const handleOwnerLogin = async () => {
+    const passcode = window.prompt('Owner passcode');
+    if (!passcode) return;
+    setOwnerPasscode(passcode);
+    const s = await api.session().catch(() => null);
+    if (s?.owner) {
+      setSession(s);
+      setNotice('Owner mode is on in this browser.');
+    } else {
+      setOwnerPasscode(null);
+      setNotice('That passcode was not accepted.');
+    }
+  };
+
+  const handleOwnerLogout = () => {
+    setOwnerPasscode(null);
+    setSession((s) => ({ ...s, owner: false }));
+    if (activeTab === 'log') setActiveTab('feed');
+  };
 
   useEffect(() => {
     api
@@ -589,7 +617,7 @@ export default function App() {
 
           <nav className="flex items-center gap-xs bg-tertiary p-xxs rounded-md border border-secondary">
             <NavButton active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={TrendingUp} label="Feed" />
-            <NavButton active={activeTab === 'log'} onClick={() => setActiveTab('log')} icon={PlusCircle} label="Log Pick" />
+            {canWrite && <NavButton active={activeTab === 'log'} onClick={() => setActiveTab('log')} icon={PlusCircle} label="Log Pick" />}
             <NavButton active={activeTab === 'sources'} onClick={() => setActiveTab('sources')} icon={Users} label="Sources" />
             <NavButton active={activeTab === 'agent'} onClick={() => setActiveTab('agent')} icon={Bot} label="Agent" />
             <NavButton active={activeTab === 'memory'} onClick={() => setActiveTab('memory')} icon={Brain} label="Memory" />
@@ -597,6 +625,15 @@ export default function App() {
           </nav>
 
           <div className="hidden lg:flex items-center gap-sm">
+            {session.readOnly && (
+              <button
+                onClick={session.owner ? handleOwnerLogout : handleOwnerLogin}
+                className="px-md py-xs rounded-md border border-secondary bg-secondary text-xs font-medium text-secondary hover:text-primary flex items-center gap-xxs"
+                title={session.owner ? 'Leave owner mode in this browser' : 'Unlock logging and grading'}
+              >
+                {session.owner ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} {session.owner ? 'Owner' : 'Owner login'}
+              </button>
+            )}
             <div className="px-md py-xs rounded-md bg-tertiary border border-secondary text-xs flex items-center gap-xs">
               <span className={`w-2 h-2 rounded-full ${memoryError ? 'bg-error-secondary' : 'bg-brand-solid animate-pulse'}`}></span>
               <span className="text-secondary font-medium">{networkLabel}</span>
@@ -606,6 +643,11 @@ export default function App() {
       </header>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-xl py-2xl space-y-xl">
+        {!canWrite && (
+          <div className="p-md rounded-md bg-utility-brand-50 border border-utility-brand-200 text-utility-brand-700 text-xs">
+            You're viewing a live, read-only demo. Every pick, grade and trust score here is stored on Walrus Memory Mainnet (see the Memory tab). On the Agent tab you can buy a sealed pick with your own Sui wallet.
+          </div>
+        )}
         {memoryError && <ErrorBox message={`Walrus Memory: ${memoryError}`} />}
         {learned && (
               <div className="p-lg rounded-md bg-utility-brand-50 border border-utility-brand-200 text-utility-brand-700 text-sm space-y-xxs">
@@ -658,7 +700,7 @@ export default function App() {
                     {f === 'all' ? 'All Picks' : f}
                   </button>
                 ))}
-                {picks.some((p) => p.status === 'pending' && p.marketId) && (
+                {canWrite && picks.some((p) => p.status === 'pending' && p.marketId) && (
                   <button
                     onClick={handleSettle}
                     disabled={settling}
@@ -760,11 +802,12 @@ export default function App() {
                     </div>
                     <div className="min-w-[120px] flex flex-col items-end gap-xs">
                       <StatusBadge status={pick.status} />
-                      {pick.status === 'pending' && pick.blobId && (
+                      {canWrite && pick.status === 'pending' && pick.blobId && (
                         <GradeButtons busy={gradingId === pick.id} onGrade={(result) => handleGrade(pick, result)} />
                       )}
                       {pick.grade?.blobId && <ProofLink url={pick.grade.explorerUrl} blobId={pick.grade.blobId} />}
-                      {pick.status !== 'pending' &&
+                      {canWrite &&
+                        pick.status !== 'pending' &&
                         (regradeId === pick.id || gradingId === pick.id ? (
                           <GradeButtons
                             busy={gradingId === pick.id}
@@ -1020,13 +1063,13 @@ export default function App() {
                               {cred.length ? cred.map((c) => `${c.trust} on ${c.league}`).join(', ') : 'Not graded yet'}
                             </td>
                             <td className="py-xs px-sm text-right">
-                              <button
+                              {canWrite && <button
                                 onClick={() => handleFollow(t)}
                                 disabled={followingWallet !== null}
                                 className="px-md py-xxs rounded-sm border border-secondary bg-tertiary text-xs font-medium text-primary hover:bg-secondary-hover disabled:opacity-50 inline-flex items-center gap-xxs"
                               >
                                 {followingWallet === t.proxyWallet ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />} Log latest 5 trades
-                              </button>
+                              </button>}
                             </td>
                           </tr>
                         );
@@ -1192,9 +1235,9 @@ export default function App() {
             <div className="space-y-sm">
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-bold">Sealed picks</h2>
-                <button onClick={() => setShowSeal((v) => !v)} className="px-md py-xs rounded-sm border border-secondary bg-secondary text-xs font-medium text-primary flex items-center gap-xxs">
+                {canWrite && <button onClick={() => setShowSeal((v) => !v)} className="px-md py-xs rounded-sm border border-secondary bg-secondary text-xs font-medium text-primary flex items-center gap-xxs">
                   <Lock className="w-3.5 h-3.5" /> {showSeal ? 'Close' : 'Seal a pick (as a tipster)'}
-                </button>
+                </button>}
               </div>
 
               {showSeal && (
@@ -1250,7 +1293,7 @@ export default function App() {
                           <span className="inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700">
                             <Unlock className="w-3.5 h-3.5" /> Unlocked
                           </span>
-                        ) : (
+                        ) : canWrite && (
                           <button
                             onClick={() => handleBuy(o)}
                             disabled={buyingId !== null}
@@ -1367,9 +1410,9 @@ export default function App() {
                   className="w-16 px-sm py-xxs rounded-sm bg-tertiary border border-secondary text-primary"
                 />
                 <span>losing picks in one day</span>
-                <button onClick={handleSetLimit} className="px-md py-xxs rounded-sm bg-brand-solid text-primary-on-brand font-semibold">
+                {canWrite && <button onClick={handleSetLimit} className="px-md py-xxs rounded-sm bg-brand-solid text-primary-on-brand font-semibold">
                   Remember this
-                </button>
+                </button>}
                 {profile?.limit?.maxDailyLosses && (
                   <span className="text-tertiary">
                     Current: {profile.limit.maxDailyLosses} · <ProofLink url={profile.limit.explorerUrl} blobId={profile.limit.blobId} />

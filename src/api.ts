@@ -194,11 +194,29 @@ export interface JobStatus {
   error?: string;
 }
 
+const PASSCODE_KEY = 'receipts:owner-passcode';
+
+export function ownerPasscode(): string {
+  try {
+    return localStorage.getItem(PASSCODE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setOwnerPasscode(value: string | null) {
+  try {
+    if (value) localStorage.setItem(PASSCODE_KEY, value);
+    else localStorage.removeItem(PASSCODE_KEY);
+  } catch {}
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
-  });
+  const headers: Record<string, string> = {};
+  if (init?.body) headers['Content-Type'] = 'application/json';
+  const passcode = ownerPasscode();
+  if (passcode) headers['X-Owner-Passcode'] = passcode;
+  const res = await fetch(path, { ...init, headers });
   if (!res.headers.get('content-type')?.includes('application/json')) {
     // A server still running older code answers new routes with the app's HTML page.
     throw new Error(`The server has no ${path.split('?')[0]} route. Stop it and run npm run dev again to load the latest code.`);
@@ -209,6 +227,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  session: () => call<{ readOnly: boolean; owner: boolean }>('/api/session'),
   memoryStatus: () => call<{ network: string; configured: boolean; error?: string }>('/api/memory/status'),
   listPicks: () => call<{ network: string; picks: PickRecord[] }>('/api/picks'),
   logPick: (input: PickInput) =>
