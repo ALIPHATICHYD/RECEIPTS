@@ -646,7 +646,6 @@ export default function App() {
             <NavButton active={activeTab === 'sources'} onClick={() => setActiveTab('sources')} icon={Users} label="Sources" />
             <NavButton active={activeTab === 'agent'} onClick={() => setActiveTab('agent')} icon={Bot} label="Agent" />
             <NavButton active={activeTab === 'memory'} onClick={() => setActiveTab('memory')} icon={Brain} label="Memory" />
-            <NavButton active={activeTab === 'wallet'} onClick={() => setActiveTab('wallet')} icon={Wallet} label="Wallet" />
           </nav>
 
           <div className="hidden lg:flex items-center gap-md font-mono text-xs text-muted-light">

@@ -9,7 +9,6 @@ const COLUMNS: { title: string; links: { label: string; href: string; external?:
       { label: 'Sources', href: '#sources' },
       { label: 'Agent', href: '#agent' },
       { label: 'Memory', href: '#memory' },
-      { label: 'Wallet', href: '#wallet' },
     ],
   },
   {
