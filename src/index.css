@@ -6,10 +6,258 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tatum foundation — read through the tokens, never hardcoded. The full system
-   (component anatomy, states, layout) is in the `tatum-design` skill. */
+/* Thermal theme. The token classes stay the same; their values move to a
+   receipt-paper palette: paper and ink, stamp orange for lost and sealed,
+   carbon blue for won and paid. Square corners, no soft shadows. */
+:root {
+  --color-text-primary: #121212;
+  --color-text-secondary: #3a3732;
+  --color-text-tertiary: #5e5a52;
+  --color-text-quaternary: #77726a;
+  --color-text-primary-on-brand: #f2efe6;
+  --color-text-placeholder: #77726a;
+  --color-text-disabled: #8c877d;
+  --color-text-brand-primary: #1f4fd8;
+  --color-text-error-primary: #c23a15;
+  --color-text-warning-primary: #8a5a00;
+  --color-text-success-primary: #1f4fd8;
+  --color-fg-primary: #121212;
+  --color-fg-secondary: #3a3732;
+  --color-fg-tertiary: #5e5a52;
+  --color-fg-quaternary: #77726a;
+  --color-fg-quaternary-hover: #3a3732;
+  --color-fg-brand-primary: #1f4fd8;
+  --color-fg-error-primary: #c23a15;
+  --color-fg-warning-primary: #8a5a00;
+  --color-fg-success-primary: #1f4fd8;
+  --color-bg-primary: #f2efe6;
+  --color-bg-primary-hover: #e9e5d9;
+  --color-bg-primary-solid: #121212;
+  --color-bg-secondary: #fffdf7;
+  --color-bg-secondary-hover: #f7f3e8;
+  --color-bg-tertiary: #ece8dc;
+  --color-bg-overlay: #121212;
+  --color-bg-brand-solid: #121212;
+  --color-bg-brand-solid-hover: #2b2925;
+  --color-bg-error-primary: #fbe9e3;
+  --color-bg-error-secondary: #f6d3c7;
+  --color-bg-success-primary: #e6ecfb;
+  --color-bg-success-secondary: #cdd9f6;
+  --color-bg-disabled-subtle: #d9d4c7;
+  --color-border-primary: #121212;
+  --color-border-secondary: #121212;
+  --color-border-brand: #1f4fd8;
+  --color-ring-focus-ring: #1f4fd8;
+  --color-utility-gray-50: #ece8dc;
+  --color-utility-gray-200: #121212;
+  --color-utility-gray-600: #5e5a52;
+  --color-utility-gray-700: #3a3732;
+  --color-utility-brand-50: #e6ecfb;
+  --color-utility-brand-200: #1f4fd8;
+  --color-utility-brand-600: #1f4fd8;
+  --color-utility-brand-700: #1a3a9e;
+  --color-utility-success-50: #e6ecfb;
+  --color-utility-success-200: #1f4fd8;
+  --color-utility-success-600: #1f4fd8;
+  --color-utility-success-700: #1a43b8;
+  --color-utility-warning-50: #f8efd6;
+  --color-utility-warning-200: #8a5a00;
+  --color-utility-warning-600: #8a5a00;
+  --color-utility-warning-700: #6e4800;
+  --color-utility-error-50: #fbe9e3;
+  --color-utility-error-200: #e8461e;
+  --color-utility-error-600: #c23a15;
+  --color-utility-error-700: #b03312;
+  --radius-xxs: 0;
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-3xl: 0;
+  --radius-4xl: 0;
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --font-family-sans: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+
+  --ink: #121212;
+  --paper: #f2efe6;
+  --slip: #fffdf7;
+  --stamp: #e8461e;
+  --stamp-text: #c23a15;
+  --carbon: #1f4fd8;
+}
+
 body {
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-family: var(--font-family-sans);
+}
+
+/* Film grain over the whole page, like cheap thermal paper. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0.07;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* Hashes and tx digests in notes are long unbroken strings; let them wrap. */
+main {
+  overflow-wrap: anywhere;
+}
+
+/* Receipt-style dashed row rules instead of solid table dividers. */
+.divide-secondary > :not([hidden]) ~ :not([hidden]) {
+  border-style: dashed;
+}
+
+@layer components {
+  .font-display {
+    font-family: var(--font-family-sans);
+    font-weight: 800;
+    font-stretch: 75%;
+    letter-spacing: -0.01em;
+    line-height: 0.9;
+    text-transform: uppercase;
+  }
+  .kicker {
+    @apply font-mono text-xs uppercase;
+    letter-spacing: 0.08em;
+  }
+  /* Halftone-dot text: the letters are filled with a dot screen. */
+  .dot-text {
+    background-image: radial-gradient(currentColor 1.3px, transparent 1.6px);
+    background-size: 5px 5px;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .halftone {
+    background-color: var(--ink);
+    background-image: radial-gradient(circle, var(--paper) 0 1px, transparent 1.4px),
+      radial-gradient(circle, var(--paper) 0 0.6px, transparent 1px);
+    background-size: 6px 6px, 6px 6px;
+    background-position: 0 0, 3px 3px;
+  }
+  .dither {
+    background-image: radial-gradient(var(--ink) 1px, transparent 1.3px);
+    background-size: 4px 4px;
+  }
+  .barcode {
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--ink) 0 2px,
+      transparent 2px 4px,
+      var(--ink) 4px 5px,
+      transparent 5px 8px,
+      var(--ink) 8px 11px,
+      transparent 11px 13px
+    );
+  }
+  .barcode-light {
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--paper) 0 2px,
+      transparent 2px 4px,
+      var(--paper) 4px 5px,
+      transparent 5px 8px,
+      var(--paper) 8px 11px,
+      transparent 11px 13px
+    );
+  }
+  /* Torn bottom edge of a slip. Set --zig-bg to whatever sits behind it. */
+  .zig {
+    height: 12px;
+    background-color: var(--zig-bg, var(--paper));
+    background-image: linear-gradient(135deg, transparent 6px, var(--zig-fg, var(--slip)) 6px),
+      linear-gradient(225deg, transparent 6px, var(--zig-fg, var(--slip)) 6px);
+    background-size: 12px 12px;
+  }
+  .scan {
+    background-image: repeating-linear-gradient(0deg, rgba(10, 10, 10, 0.45) 0 1px, transparent 1px 3px);
+  }
+  .stamp {
+    @apply inline-block font-extrabold uppercase whitespace-nowrap;
+    border: 3px solid currentColor;
+    padding: 0 0.5rem;
+    line-height: 1.25;
+    letter-spacing: 0.02em;
+    transform: rotate(-8deg);
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-xs font-bold text-sm whitespace-nowrap transition-colors disabled:opacity-50;
+    min-height: 40px;
+    padding: 0.5rem 1rem;
+  }
+  .btn-ink {
+    @apply btn;
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .btn-ink:hover:not(:disabled) {
+    background: #2b2925;
+  }
+  .btn-stamp {
+    @apply btn;
+    background: var(--stamp);
+    color: var(--ink);
+  }
+  .btn-stamp:hover:not(:disabled) {
+    background: #d23d17;
+  }
+  .btn-line {
+    @apply btn;
+    border: 1px solid currentColor;
+  }
+  .btn-line:hover:not(:disabled) {
+    background: rgba(18, 18, 18, 0.06);
+  }
+}
+
+@keyframes ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.ticker-track {
+  display: inline-flex;
+  animation: ticker 60s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track {
+    animation: none;
+  }
+}
+
+/* The Sui wallet button (dapp-kit) reads shadcn-style variables through its
+   shadow root; point them at the Thermal palette. */
+:root {
+  --primary: #121212;
+  --primary-foreground: #f2efe6;
+  --background: #fffdf7;
+  --foreground: #121212;
+  --border: #121212;
+  --input: #121212;
+  --ring: #1f4fd8;
+  --popover: #fffdf7;
+  --popover-foreground: #121212;
+  --secondary: #ece8dc;
+  --secondary-foreground: #121212;
+  --muted: #ece8dc;
+  --muted-foreground: #5e5a52;
+  --accent: #ece8dc;
+  --accent-foreground: #121212;
+  --destructive: #c23a15;
+  --positive: #1f4fd8;
+  --radius: 0px;
+  --font-sans: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
 }

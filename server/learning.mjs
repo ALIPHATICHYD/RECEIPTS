@@ -233,8 +233,8 @@ export async function writeLimit(maxDailyLosses, previous) {
 }
 
 // ---------- Advice ----------
-// Rule-based on purpose: every line points at the memory it came from, so a judge
-// (or the user) can open the blob and check why the app said it.
+// Rule-based on purpose: every line points at the memory it came from, so anyone
+// reading it can open the blob and check why the app said it.
 
 const sameEvent = (a, b) => a.event.toLowerCase().replace(/\s+/g, ' ').trim() === b.event.toLowerCase().replace(/\s+/g, ' ').trim()
 
