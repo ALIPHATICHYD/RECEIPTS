@@ -8,6 +8,23 @@ Built for the Tatum x Walrus **Total Recall** hackathon (Track 01: Markets & Spo
 
 **Live demo:** https://receipts-adf6.onrender.com
 
+## How to test
+
+No account, key or install is needed for steps 1 to 3.
+
+1. **Open the live demo:** https://receipts-adf6.onrender.com. It is on Render's free plan, so the first load can take about a minute while the server wakes up. Visitors get a read-only view of the real journal on Walrus Memory Mainnet.
+2. **Check the memory is real.** On **Feed**, every pick has a `BLOB` link to Walruscan. **Memory** lists every memory the app has written, by namespace, each with its blob.
+3. **See it learn.** **Sources** shows trust per source and league, and *How Receipts changed its mind* lists every score change, each its own Walrus memory naming the score it replaced.
+4. **Pay for a pick with your own wallet (optional, mainnet).** Go to **Agent**, connect any Sui wallet (Slush, Suiet, Phantom) and press **Pay 0.05 USDC with my wallet** on a sealed pick. You need about 0.05 USDC and 0.01 SUI on Sui mainnet; there is no mainnet faucet, so buy or swap a little in your wallet first. The server verifies the transfer through Tatum's Sui gRPC gateway before it shows you the pick. Each payment links to Suiscan.
+5. **Run every feature locally with no keys:**
+   ```bash
+   git clone https://github.com/ALIPHATICHYD/RECEIPTS && cd RECEIPTS
+   npm install
+   npm run dev:mock   # http://localhost:3000, needs Node 22.9+
+   ```
+   Mock mode swaps in an in-memory Walrus Memory, recorded Tatum prediction market responses and fake Sui payments, and leaves the passcode off. You can log, paste a tip, grade, follow a Polymarket trader, seal a pick and let the agent pay.
+6. **Run it against mainnet with your own keys:** see [Run it locally](#run-it-locally).
+
 ## What works today
 
 - **Log a pick** with event, market, side, odds, source and confidence. Each pick becomes a Walrus memory with a blob you can open on Walruscan.
