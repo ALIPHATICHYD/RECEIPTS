@@ -128,7 +128,8 @@ export async function writeCredibility(picks, pick, previous) {
     `Credibility update: ${score.source} on ${score.league} ${move} after ${pick.event} (${pick.side}) ${verb}. ` +
     `Record ${score.won}W-${score.lost}L-${score.push}P over ${plural(score.n, 'graded pick')}, ${pct(score.roi)} ROI` +
     `${score.clv !== null ? `, ${pct(score.clv)} average closing-line value` : ''}.` +
-    `${previous ? ` Supersedes the score in blob ${previous.blobId}.` : ''}`
+    // A score written moments ago in the same batch has no blob yet; name it by its value instead.
+    `${previous ? ` Supersedes the previous score of ${prevTrust}${previous.blobId ? ` in blob ${previous.blobId}` : ''}.` : ''}`
   const record = {
     ...score,
     prevTrust,
@@ -209,9 +210,9 @@ export async function writePatternChanges(picks, profile) {
     if ((previous?.verdict ?? 'neutral') === pat.verdict) continue
     const sentence =
       pat.verdict === 'leak'
-        ? `Pattern: ${pat.label} in your journal are losing, ${pat.won}W-${pat.lost}L over ${pat.n} graded picks (${pct(pat.roi)} ROI). Warn before logging more of these.`
+        ? `Pattern: ${pat.label} in this journal are losing money, ${pat.won}W-${pat.lost}L over ${pat.n} graded picks (${pct(pat.roi)} ROI). Warn before logging more of these.`
         : pat.verdict === 'edge'
-          ? `Pattern: ${pat.label} in your journal are winning, ${pat.won}W-${pat.lost}L over ${pat.n} graded picks (${pct(pat.roi)} ROI).`
+          ? `Pattern: ${pat.label} in this journal are making money, ${pat.won}W-${pat.lost}L over ${pat.n} graded picks (${pct(pat.roi)} ROI).`
           : `Pattern: ${pat.label} are back to break-even (${pct(pat.roi)} ROI over ${pat.n} picks); the earlier ${previous.verdict} no longer holds.`
     const record = { type: 'pattern', ...pat, supersedes: previous?.blobId ?? null, recordedAt: new Date().toISOString() }
     await memwal().remember(`${sentence}\n${PROFILE_MARKER}${JSON.stringify(record)}`, NAMESPACES.profile)
@@ -284,8 +285,8 @@ export function adviseOpenPicks(picks, credibility, profile) {
           tone: pat.verdict === 'leak' ? 'warn' : 'good',
           text:
             pat.verdict === 'leak'
-              ? `Your ${pat.label} are ${pat.won}W-${pat.lost}L (${pct(pat.roi)} ROI). This pick fits that pattern.`
-              : `Your ${pat.label} are ${pat.won}W-${pat.lost}L (${pct(pat.roi)} ROI).`,
+              ? `${pat.label[0].toUpperCase() + pat.label.slice(1)} in this journal are ${pat.won}W-${pat.lost}L (${pct(pat.roi)} ROI). This pick fits that pattern.`
+              : `${pat.label[0].toUpperCase() + pat.label.slice(1)} in this journal are ${pat.won}W-${pat.lost}L (${pct(pat.roi)} ROI).`,
           memory: { blobId: pat.blobId, explorerUrl: pat.explorerUrl },
         })
       }
