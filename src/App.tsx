@@ -134,6 +134,7 @@ function ErrorBox({ message }: { message: string }) {
 
 // Raw relayer bodies are for the server log, not for visitors.
 function friendlyError(message: string) {
+  if (/HTTP status code 429|RESOURCE_EXHAUSTED/i.test(message)) return 'The Sui network gateway is busy right now. Wait a minute and try again.';
   if (/\(429\)|rate limit/i.test(message)) return 'Walrus Memory is busy right now. Wait a minute and try again.';
   return message;
 }
