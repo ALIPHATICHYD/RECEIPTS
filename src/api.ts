@@ -96,6 +96,9 @@ export interface SealInput {
   odds: string;
   price: string;
   payTo: string;
+  // Empty: the server detects the league from the event text.
+  league?: string;
+  category?: string;
 }
 
 export interface AgentDecision extends MemoryRef {
