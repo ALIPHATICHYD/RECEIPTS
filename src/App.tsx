@@ -69,7 +69,24 @@ const EMPTY_FORM: PickInput = {
   notes: '',
 };
 
-const EMPTY_SEAL: SealInput = { source: '@', event: '', teaser: '', market: '', side: '', odds: '', price: '0.05', payTo: '' };
+function readPref(key: string, fallback: string) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writePref(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage blocked (private mode): the rule just won't survive a reload.
+  }
+}
+
+const EMPTY_SEAL: SealInput = { source: '@', event: '', teaser: '', market: '', side: '', odds: '', price: '0.05', payTo: '', league: '' };
+// Leagues the seal form offers besides the ones the seller already has a record in.
+const SEAL_LEAGUES = ['Polymarket', 'NBA', 'NFL', 'EPL', 'UCL', 'La Liga', 'NHL', 'MLB', 'Elections', 'Crypto', 'Macro', 'Sports'];
 
 const inputClass =
   'w-full px-md py-sm bg-secondary border border-primary text-primary text-sm placeholder:text-placeholder focus:outline-none focus:ring-2 focus:ring-focus-ring';
@@ -285,8 +302,11 @@ export default function App() {
   const [walletSetupError, setWalletSetupError] = useState<string | null>(null);
   const [decisions, setDecisions] = useState<AgentDecision[]>([]);
   const [agentError, setAgentError] = useState<string | null>(null);
-  const [minTrust, setMinTrust] = useState('55');
-  const [maxPrice, setMaxPrice] = useState('0.25');
+  // The agent's rule is remembered in this browser, so a reload doesn't reset it.
+  const [minTrust, setMinTrust] = useState(() => readPref('receipts.minTrust', '55'));
+  const [maxPrice, setMaxPrice] = useState(() => readPref('receipts.maxPrice', '0.25'));
+  useEffect(() => writePref('receipts.minTrust', minTrust), [minTrust]);
+  useEffect(() => writePref('receipts.maxPrice', maxPrice), [maxPrice]);
   const [buyingId, setBuyingId] = useState<string | null>(null);
   const [buyResults, setBuyResults] = useState<Record<string, BuyResult>>({});
   const [sealForm, setSealForm] = useState<SealInput>(EMPTY_SEAL);
@@ -431,7 +451,7 @@ export default function App() {
     setSealing(true);
     setAgentError(null);
     try {
-      const res = await api.sealPick(sealForm);
+      const res = await api.sealPick({ ...sealForm, category: sealForm.league === 'Polymarket' ? 'Polymarket' : undefined });
       setOffers((prev) => [res.offer, ...prev]);
       setSealForm({ ...EMPTY_SEAL, source: sealForm.source, payTo: sealForm.payTo });
       setShowSeal(false);
@@ -1310,6 +1330,29 @@ export default function App() {
                 <form onSubmit={handleSeal} className="p-xl bg-secondary border border-primary grid grid-cols-1 md:grid-cols-2 gap-md">
                   <input className={inputClass} placeholder="Tipster handle or profile link" value={sealForm.source} onChange={(e) => setSealForm({ ...sealForm, source: e.target.value })} required />
                   <input className={inputClass} placeholder="Event, e.g. Celtics vs Knicks" value={sealForm.event} onChange={(e) => setSealForm({ ...sealForm, event: e.target.value })} required />
+                  {(() => {
+                    // Trust is scored per source and league, so show which leagues this seller already has a record in.
+                    const handle = sealForm.source.trim().toLowerCase();
+                    const known = credBoard.filter((c) => c.n > 0 && c.source.toLowerCase() === handle);
+                    const rest = SEAL_LEAGUES.filter((l) => !known.some((c) => c.league === l));
+                    return (
+                      <select className={`${inputClass} md:col-span-2`} value={sealForm.league ?? ''} onChange={(e) => setSealForm({ ...sealForm, league: e.target.value })} aria-label="League">
+                        <option value="">League: detect from the event</option>
+                        {known.length > 0 && (
+                          <optgroup label={`${sealForm.source.trim()} has a record in`}>
+                            {known.map((c) => (
+                              <option key={c.league} value={c.league}>{`${c.league} (trust ${c.trust}, ${c.won}W-${c.lost}L)`}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <optgroup label="Other leagues">
+                          {rest.map((l) => (
+                            <option key={l} value={l}>{l}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    );
+                  })()}
                   <input className={`${inputClass} md:col-span-2`} placeholder="Public teaser buyers see, e.g. Big edge on the spread" value={sealForm.teaser} onChange={(e) => setSealForm({ ...sealForm, teaser: e.target.value })} />
                   <input className={inputClass} placeholder="Hidden: market, e.g. Spread" value={sealForm.market} onChange={(e) => setSealForm({ ...sealForm, market: e.target.value })} required />
                   <input className={inputClass} placeholder="Hidden: side, e.g. Celtics -4.5" value={sealForm.side} onChange={(e) => setSealForm({ ...sealForm, side: e.target.value })} required />
