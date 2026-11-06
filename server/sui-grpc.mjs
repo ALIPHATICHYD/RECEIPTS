@@ -12,12 +12,41 @@ function target(network) {
   return { host: `${new URL(tatumGrpcUrl('sui', network)).hostname}:443`, credentials: grpc.credentials.createSsl() }
 }
 
+// Tatum's gateway answers HTTP 429 to bursts, and building one Sui transaction
+// fires several calls at once. Space call starts out instead (SUI_GRPC_GAP_MS,
+// default 400ms, about 2.5 calls a second across the whole server).
+const GAP_MS = Number(process.env.SUI_GRPC_GAP_MS ?? 400)
+let nextStart = 0
+function spacing(options, nextCall) {
+  let started = false
+  const queued = []
+  return new grpc.InterceptingCall(nextCall(options), {
+    start(metadata, listener, next) {
+      const now = Date.now()
+      const at = Math.max(now, nextStart)
+      nextStart = at + GAP_MS
+      setTimeout(() => {
+        next(metadata, listener)
+        started = true
+        for (const run of queued.splice(0)) run()
+      }, at - now)
+    },
+    sendMessage(message, next) {
+      started ? next(message) : queued.push(() => next(message))
+    },
+    halfClose(next) {
+      started ? next() : queued.push(() => next())
+    },
+  })
+}
+const clientOptions = { interceptors: [spacing] }
+
 const keyMeta = () => ({ 'x-api-key': process.env.TATUM_API_KEY ?? '' })
 
 // Transport for SuiGrpcClient on the server.
 export function grpcTransport(network) {
   const { host, credentials } = target(network)
-  return new GrpcTransport({ host, channelCredentials: credentials, meta: keyMeta() })
+  return new GrpcTransport({ host, channelCredentials: credentials, meta: keyMeta(), clientOptions })
 }
 
 // gRPC-web binary framing: 1 flag byte (0x00 data, 0x80 trailers), 4-byte length, payload.
@@ -36,7 +65,7 @@ const clients = new Map()
 function rawClient(network) {
   if (!clients.has(network)) {
     const { host, credentials } = target(network)
-    clients.set(network, new grpc.Client(host, credentials))
+    clients.set(network, new grpc.Client(host, credentials, clientOptions))
   }
   return clients.get(network)
 }
