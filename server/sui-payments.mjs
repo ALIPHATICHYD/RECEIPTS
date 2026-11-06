@@ -47,6 +47,21 @@ export function sui() {
   return client
 }
 
+// Tatum's Sui gateway rate-limits bursts (HTTP 429), and building a transaction
+// alone takes several calls. Retry rate-limit and unavailable errors with backoff.
+const RETRYABLE = /\b429\b|RESOURCE_EXHAUSTED|rate limit|UNAVAILABLE|\b503\b/i
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+export async function withRetry(fn, delays = [1500, 3000, 6000, 10000]) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      if (attempt >= delays.length || !RETRYABLE.test(`${err?.code ?? ''} ${err?.message ?? ''}`)) throw err
+      await sleep(delays[attempt])
+    }
+  }
+}
+
 const errorText = (e) => (typeof e === 'string' ? e : e?.message ?? JSON.stringify(e) ?? 'unknown error')
 
 // Sui stores addresses padded to 64 hex characters; compare them normalized.
@@ -70,8 +85,7 @@ export function agentAddress() {
 
 export async function balances(address) {
   if (paymentsMock()) return { sui: '1.00', usdc: '2.00' }
-  const { balances: all } = await sui()
-    .listBalances({ owner: address })
+  const { balances: all } = await withRetry(() => sui().listBalances({ owner: address }))
     .catch((err) => {
       throw new Error(`Tatum Sui gRPC (${tatumGrpcUrl('sui', paymentsNetwork())}) failed reading balances: ${err.message}`)
     })
@@ -91,9 +105,14 @@ export async function payUsdc(payTo, amount) {
   const tx = new Transaction()
   tx.setSender(signer.getPublicKey().toSuiAddress())
   tx.transferObjects([coinWithBalance({ type: usdcType(), balance: BigInt(amount) })], payTo)
-  const res = await sui().signAndExecuteTransaction({ transaction: tx, signer })
+  // Build and sign once, then submit the same signed bytes on each retry: a resend
+  // of an identical transaction can't pay twice.
+  const bytes = await withRetry(() => tx.build({ client: sui() }))
+  const { signature } = await signer.signTransaction(bytes)
+  const res = await withRetry(() => sui().executeTransaction({ transaction: bytes, signatures: [signature] }))
   if (res.$kind !== 'Transaction') throw new Error(`Payment failed on chain: ${errorText(res.FailedTransaction.status.error)}`)
-  await sui().waitForTransaction({ digest: res.Transaction.digest })
+  // Gentle polling; waitForTransaction already ignores failed polls until its timeout.
+  await sui().waitForTransaction({ digest: res.Transaction.digest, pollSchedule: [0, 1000, 2500, 5000] })
   return res.Transaction.digest
 }
 
@@ -112,7 +131,7 @@ export async function verifyPayment({ digest, payTo, amount, notBefore }) {
   }
   let tx
   try {
-    const res = await sui().getTransaction({ digest, include: { balanceChanges: true, transaction: true } })
+    const res = await withRetry(() => sui().getTransaction({ digest, include: { balanceChanges: true, transaction: true } }))
     tx = res.Transaction ?? res.FailedTransaction
   } catch (err) {
     return { ok: false, reason: `Transaction not found through Tatum Sui gRPC: ${err.message}` }
