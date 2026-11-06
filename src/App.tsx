@@ -1249,7 +1249,8 @@ export default function App() {
             {paymentsMock && <div className="p-md border border-dashed border-primary font-mono text-xs text-secondary">MOCK PAYMENTS ARE ON: NOTHING IS PAID ON CHAIN.</div>}
             {agentError && <ErrorBox message={agentError} />}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-xl items-stretch">
+            {/* Raised so the wallet menu opens over the sealed slips below (they're tilted, which gives each its own stacking layer). */}
+            <div className="relative z-20 grid grid-cols-1 lg:grid-cols-3 gap-xl items-stretch">
               <div className="p-xl bg-secondary border border-primary space-y-md flex flex-col">
                 <div className="kicker flex items-center gap-xs">
                   <Wallet className="w-4 h-4" /> Buy a pick yourself
